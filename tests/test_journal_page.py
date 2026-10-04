@@ -67,6 +67,61 @@ class MarketJournalPageTests(unittest.TestCase):
         grid_width = page.heatmap._weeks * cell + (page.heatmap._weeks - 1) * gap
         self.assertLess(abs((x0 - 28) - (page.heatmap.width() - x0 - grid_width)), 3)
 
+    def test_year_selector_requests_calendar_year_without_changing_rolling_metrics(self):
+        page = MarketJournalPage(THEMES["light"])
+        self.addCleanup(page.close)
+        current_year = date.today().year
+        older_year = current_year - 1
+        page.set_content(
+            None, {date.today(): 2}, (), "账户 123",
+            year_activity={date(older_year, 2, 3): 4},
+            available_years=(older_year, current_year),
+            account_key=(123, "server"), selected_year=current_year,
+        )
+        self.assertEqual(page.selected_year, current_year)
+        self.assertEqual(page.summary_values[1].text(), "2")
+        self.assertEqual(page.summary_values[2].text(), "1")
+
+        requested: list[int] = []
+        page.year_requested.connect(requested.append)
+        older_index = page.year_selector.findData(older_year)
+        self.assertGreaterEqual(older_index, 0)
+        page.year_selector.setCurrentIndex(older_index)
+        self.assertEqual(requested, [older_year])
+
+        page.set_content(
+            None, {date.today(): 2}, (), "账户 123",
+            year_activity={date(older_year, 2, 3): 4},
+            available_years=(older_year, current_year),
+            account_key=(123, "server"), selected_year=older_year,
+        )
+        self.assertEqual(requested, [older_year])
+        self.assertEqual(page.selected_year, older_year)
+        self.assertEqual(page.year_selector.currentData(), older_year)
+        self.assertEqual(page.heatmap._activity, {date(older_year, 2, 3): 4})
+        self.assertIn(str(older_year), page.activity_summary.text())
+        self.assertEqual([label.text() for label in page.summary_values], ["0", "2", "1"])
+
+    def test_leap_year_heatmap_includes_all_366_calendar_days(self):
+        page = MarketJournalPage(THEMES["dark"])
+        self.addCleanup(page.close)
+        page.set_content(
+            None, {}, (), "账户 123",
+            year_activity={date(2024, 2, 29): 1, date(2024, 12, 31): 2},
+            available_years=(2024,), account_key=(123, "server"), selected_year=2024,
+        )
+        page.resize(1100, 900)
+        page.show()
+        self.app.processEvents()
+
+        self.assertEqual(page.heatmap._first, date(2024, 1, 1))
+        self.assertEqual(page.heatmap._last, date(2024, 12, 31))
+        days = [day for day, _rect in page.heatmap._cells]
+        self.assertEqual(len(days), 366)
+        self.assertIn(date(2024, 2, 29), days)
+        self.assertIn(date(2024, 12, 31), days)
+        self.assertIn("3", page.activity_summary.text())
+
     def test_failed_save_keeps_text_images_and_selected_positions(self):
         page = MarketJournalPage(THEMES["dark"])
         self.addCleanup(page.close)

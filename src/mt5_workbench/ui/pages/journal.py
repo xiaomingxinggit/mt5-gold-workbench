@@ -15,6 +15,7 @@ from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -94,31 +95,35 @@ def _pnl_role(value: Any) -> str:
 
 
 class ActivityHeatmap(QWidget):
-    """A compact, accessible 365-day contribution grid."""
+    """A compact contribution grid for one calendar year."""
 
     def __init__(self, palette: Mapping[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._palette = dict(palette)
         self._activity: dict[date, int] = {}
-        self._today = date.today()
-        self._first = self._today - timedelta(days=364)
+        self._year = date.today().year
+        self._first = date(self._year, 1, 1)
+        self._last = date.today()
         self._grid_start = self._first - timedelta(days=self._first.weekday())
-        self._weeks = ((self._today - self._grid_start).days // 7) + 1
+        self._weeks = ((self._last - self._grid_start).days // 7) + 1
         self._cells: list[tuple[date, QRectF]] = []
         self.setMouseTracking(True)
         self.setFixedHeight(184)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setAccessibleName("过去 365 天发帖贡献图")
+        self.setAccessibleName(f"{self._year} 年发帖贡献图")
 
     def set_palette(self, palette: Mapping[str, str]) -> None:
         self._palette = dict(palette)
         self.update()
 
-    def set_activity(self, activity: Mapping[date, int]) -> None:
-        self._today = date.today()
-        self._first = self._today - timedelta(days=364)
+    def set_activity(self, activity: Mapping[date, int], *, year: int | None = None) -> None:
+        self._year = date.today().year if year is None else year
+        self._first = date(self._year, 1, 1)
+        self._last = (date.today() if self._year == date.today().year
+                      else date(self._year, 12, 31))
         self._grid_start = self._first - timedelta(days=self._first.weekday())
-        self._weeks = ((self._today - self._grid_start).days // 7) + 1
+        self._weeks = ((self._last - self._grid_start).days // 7) + 1
+        self.setAccessibleName(f"{self._year} 年发帖贡献图")
         clean: dict[date, int] = {}
         for day, count in activity.items():
             if isinstance(day, date) and not isinstance(day, datetime):
@@ -158,14 +163,14 @@ class ActivityHeatmap(QWidget):
         self._cells = []
         for week in range(self._weeks):
             first_day = self._grid_start + timedelta(days=week * 7)
-            if self._first <= first_day <= self._today and first_day.month != last_month:
+            if self._first <= first_day <= self._last and first_day.month != last_month:
                 month_x = x0 + week * (cell + gap)
                 painter.setPen(QColor(p["muted"]))
                 painter.drawText(month_x, 19, f"{first_day.month}月")
                 last_month = first_day.month
             for weekday in range(7):
                 day = first_day + timedelta(days=weekday)
-                if day < self._first or day > self._today:
+                if day < self._first or day > self._last:
                     continue
                 count = self._activity.get(day, 0)
                 if count == 0:
@@ -500,10 +505,19 @@ class MarketJournalPage(QWidget):
     refresh_requested = Signal()
     page_requested = Signal(int)
     delete_requested = Signal(int)
+    year_requested = Signal(int)
 
     @property
     def current_page(self) -> int:
         return self._page
+
+    @property
+    def selected_year(self) -> int:
+        return self._selected_year
+
+    @property
+    def activity_account_key(self) -> tuple[int, str] | None:
+        return self._activity_account_key
 
     def __init__(self, palette: Mapping[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -516,6 +530,8 @@ class MarketJournalPage(QWidget):
         self._positions_current = False
         self._page = 1
         self._total_pages = 1
+        self._selected_year = date.today().year
+        self._activity_account_key: tuple[int, str] | None = None
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setMinimumWidth(800)
 
@@ -577,8 +593,16 @@ class MarketJournalPage(QWidget):
         activity_header = QHBoxLayout()
         activity_header.addWidget(_plain("记录轨迹", "section-title"))
         activity_header.addStretch(1)
-        self.activity_summary = _plain("过去 365 天 0 篇", "caption")
+        self.activity_summary = _plain(f"{self._selected_year} 年 0 篇", "caption")
         activity_header.addWidget(self.activity_summary)
+        self.year_selector = QComboBox()
+        self.year_selector.setObjectName("journalYearSelector")
+        self.year_selector.setAccessibleName("记录轨迹年份")
+        self.year_selector.setToolTip("选择年份查看当年发帖热力图")
+        self.year_selector.setMinimumWidth(112)
+        self.year_selector.addItem(f"{self._selected_year} 年", self._selected_year)
+        self.year_selector.currentIndexChanged.connect(self._year_changed)
+        activity_header.addWidget(self.year_selector)
         activity_layout.addLayout(activity_header)
         activity_layout.addWidget(_plain("每个方块代表一天；悬停可查看当日记录数。", "caption"))
         self.heatmap = ActivityHeatmap(palette)
@@ -615,7 +639,11 @@ class MarketJournalPage(QWidget):
 
     def set_content(self, page: JournalPage | None, activity: Mapping[date, int],
                     positions: tuple[PositionSnapshot, ...], account_label: str,
-                    *, positions_current: bool = True) -> None:
+                    *, positions_current: bool = True,
+                    year_activity: Mapping[date, int] | None = None,
+                    available_years: tuple[int, ...] = (),
+                    account_key: tuple[int, str] | None = None,
+                    selected_year: int | None = None) -> None:
         self._positions = positions
         self._positions_current = positions_current
         self._account_label = account_label
@@ -632,14 +660,19 @@ class MarketJournalPage(QWidget):
         recent = sum(max(0, int(count)) for day, count in activity.items()
                      if isinstance(day, date) and not isinstance(day, datetime)
                      and today - timedelta(days=29) <= day <= today)
-        annual = {day: max(0, int(count)) for day, count in activity.items()
-                  if isinstance(day, date) and not isinstance(day, datetime)
-                  and today - timedelta(days=364) <= day <= today}
+        trailing_year = {day: max(0, int(count)) for day, count in activity.items()
+                         if isinstance(day, date) and not isinstance(day, datetime)
+                         and today - timedelta(days=364) <= day <= today}
         self.summary_values[0].setText(str(total))
         self.summary_values[1].setText(str(recent))
-        self.summary_values[2].setText(str(sum(1 for count in annual.values() if count)))
-        self.activity_summary.setText(f"过去 365 天 {sum(annual.values())} 篇")
-        self.heatmap.set_activity(annual)
+        self.summary_values[2].setText(str(sum(1 for count in trailing_year.values() if count)))
+        year = selected_year if selected_year is not None else self._selected_year
+        calendar_activity = (year_activity if year_activity is not None else
+                             {day: count for day, count in activity.items()
+                              if isinstance(day, date) and not isinstance(day, datetime)
+                              and day.year == year})
+        self._activity_account_key = account_key
+        self.set_year_activity(year, calendar_activity, available_years)
         self._clear_feed()
         if not posts:
             empty = QFrame()
@@ -655,6 +688,34 @@ class MarketJournalPage(QWidget):
         else:
             for post in posts:
                 self.feed.addWidget(self._post_card(post))
+
+    def _year_changed(self, _index: int) -> None:
+        year = self.year_selector.currentData()
+        if isinstance(year, int) and year != self._selected_year:
+            self._selected_year = year
+            self.year_requested.emit(year)
+
+    def set_year_activity(self, year: int, activity: Mapping[date, int],
+                          available_years: tuple[int, ...] = ()) -> None:
+        """Update only the local contribution chart when a year is selected."""
+        if not isinstance(year, int) or isinstance(year, bool) or not 1 <= year <= 9999:
+            raise ValueError("年份无效")
+        years = sorted({date.today().year, year, *available_years}, reverse=True)
+        was_blocked = self.year_selector.blockSignals(True)
+        try:
+            self.year_selector.clear()
+            for option in years:
+                self.year_selector.addItem(f"{option} 年", option)
+            self.year_selector.setCurrentIndex(years.index(year))
+        finally:
+            self.year_selector.blockSignals(was_blocked)
+        self.year_selector.setEnabled(self._activity_account_key is not None)
+        self._selected_year = year
+        annual = {day: max(0, int(count)) for day, count in activity.items()
+                  if isinstance(day, date) and not isinstance(day, datetime)
+                  and day.year == year}
+        self.activity_summary.setText(f"{year} 年 {sum(annual.values())} 篇")
+        self.heatmap.set_activity(annual, year=year)
 
     def _clear_feed(self) -> None:
         while self.feed.count():
@@ -820,6 +881,17 @@ class MarketJournalPage(QWidget):
             QWidget#journalPage QLabel[role="notice"] {{ color: {p['warning']};
                 background: {p['surface_alt']}; border-radius: 8px;
                 padding: 10px 13px; font-size: {FONT_SIZES['caption']}px; }}
+            QWidget#journalPage QComboBox#journalYearSelector {{
+                background: {p['surface_alt']}; color: {p['text']};
+                border: 1px solid {p['border']}; border-radius: 8px;
+                padding: 7px 10px; min-height: 18px;
+                font-size: {FONT_SIZES['caption']}px; }}
+            QWidget#journalPage QComboBox#journalYearSelector:focus {{
+                border-color: {p['accent']}; }}
+            QWidget#journalPage QComboBox#journalYearSelector QAbstractItemView {{
+                background: {p['surface']}; color: {p['text']};
+                selection-background-color: {p['selected']};
+                selection-color: {p['text']}; }}
             QFrame#journalCard, QFrame#journalPost, QFrame#journalMetric {{
                 background: {p['surface']}; border: 1px solid {p['border']};
                 border-radius: 12px; }}

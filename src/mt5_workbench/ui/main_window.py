@@ -8,7 +8,7 @@ import sqlite3
 import sys
 from threading import Event, Thread
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -254,6 +254,7 @@ class MainWindow(QMainWindow):
 
         self.order_page.refresh_requested.connect(self.refresh_order_analytics)
         self.journal.refresh_requested.connect(lambda: self.refresh_journal(force_sync=True))
+        self.journal.year_requested.connect(self._journal_year_requested)
         self.journal.page_requested.connect(self._journal_page_requested)
         self.journal.publish_requested.connect(self.publish_journal)
         self.journal.delete_requested.connect(self.delete_journal_post)
@@ -571,6 +572,21 @@ class MainWindow(QMainWindow):
     def _journal_page_requested(self, page_number: int) -> None:
         self.refresh_journal(page=page_number)
 
+    def _journal_year_requested(self, year: int) -> None:
+        """Change the contribution calendar without another MT5 read."""
+        repo = self.journal_repo
+        account_key = self.journal_account_key
+        if repo is None or account_key != self.journal.activity_account_key:
+            return
+        try:
+            years = repo.available_years(account_key)
+            if year != date.today().year and year not in years:
+                raise ValueError("该年份没有本账户日志")
+            activity = repo.activity_year(account_key, year)
+            self.journal.set_year_activity(year, activity, years)
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            self.journal.set_notice(f"按年份读取记录轨迹失败：{exc}")
+
     def _cancel_journal_sync(self) -> None:
         """Invalidate in-flight results without waiting for a blocking MT5 call."""
         self._journal_sync_generation += 1
@@ -671,6 +687,11 @@ class MainWindow(QMainWindow):
             if feed.page > max(1, feed.total_pages):
                 feed = repo.list_posts(account_key, max(1, feed.total_pages), 10)
             activity = repo.activity(account_key, 365)
+            years = repo.available_years(account_key)
+            selected_year = (self.journal.selected_year
+                             if account_key == self.journal.activity_account_key
+                             else date.today().year)
+            year_activity = repo.activity_year(account_key, selected_year)
         except (OSError, sqlite3.Error, ValueError) as exc:
             self.journal.set_can_publish(False)
             self.journal.set_notice(f"读取本地日志失败：{exc}")
@@ -682,7 +703,11 @@ class MainWindow(QMainWindow):
             if not self.connected:
                 account_label += " · 离线浏览"
         self.journal.set_content(feed, activity, active, account_label,
-                                 positions_current=positions_current)
+                                 positions_current=positions_current,
+                                 year_activity=year_activity,
+                                 available_years=years,
+                                 account_key=account_key,
+                                 selected_year=selected_year)
         self.journal.set_can_publish(can_publish)
         self.journal.set_notice("；".join(errors) if errors else
                                 ("MT5 未连接，暂不能发帖或更新持仓结果" if not self.connected

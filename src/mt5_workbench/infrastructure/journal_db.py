@@ -386,6 +386,45 @@ class JournalRepository:
                 counts[day] = row["count"]
         return counts
 
+    def available_years(self, account_key: AccountKey | None) -> tuple[int, ...]:
+        """Return years containing posts for this account, newest first."""
+        if account_key is None:
+            return ()
+        login, server = _validate_account(account_key)
+        with self._connection() as db:
+            rows = db.execute("""
+                SELECT DISTINCT substr(created_at, 1, 4) AS post_year
+                FROM posts
+                WHERE account_login=? AND account_server=?
+                ORDER BY post_year DESC
+            """, (login, server)).fetchall()
+        return tuple(int(row["post_year"]) for row in rows)
+
+    def activity_year(
+        self, account_key: AccountKey | None, year: int,
+    ) -> dict[date, int]:
+        """Count posts on each day of a calendar year for one account."""
+        if not isinstance(year, int) or isinstance(year, bool) or not 1 <= year <= 9999:
+            raise ValueError("年份必须在 1 到 9999 之间")
+        start = date(year, 1, 1)
+        end = date(year, 12, 31)
+        days = (end - start).days + 1
+        counts = {start + timedelta(days=offset): 0 for offset in range(days)}
+        if account_key is None:
+            return counts
+        login, server = _validate_account(account_key)
+        with self._connection() as db:
+            rows = db.execute("""
+                SELECT substr(created_at, 1, 10) AS post_date, COUNT(*) AS count
+                FROM posts
+                WHERE account_login=? AND account_server=?
+                  AND substr(created_at, 1, 10) BETWEEN ? AND ?
+                GROUP BY post_date
+            """, (login, server, start.isoformat(), end.isoformat())).fetchall()
+        for row in rows:
+            counts[date.fromisoformat(row["post_date"])] = row["count"]
+        return counts
+
     def open_links(self, account_key: AccountKey) -> tuple[PositionLink, ...]:
         login, server = _validate_account(account_key)
         with self._connection() as db:

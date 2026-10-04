@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import threading
 import time
 import unittest
-from datetime import datetime, timezone
+from contextlib import closing
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -82,6 +84,32 @@ class MainWindowJournalTests(unittest.TestCase):
         self.assertEqual(self.window.journal.current_page, 1)
         self.assertEqual(self.window.journal.current_page_label.text(), "1 / 1")
         self.assertEqual(self.window.journal.page_note.text(), "共 0 篇 · 每页 10 篇")
+
+    def test_year_selection_updates_only_activity_and_resets_on_account_switch(self):
+        previous_year = date.today().year - 1
+        post_id = self.repo.create_post(ACCOUNT_KEY, "去年行情复盘")
+        with closing(sqlite3.connect(self.repo.db_path)) as db, db:
+            db.execute("UPDATE posts SET created_at=? WHERE id=?",
+                       (f"{previous_year}-06-12T10:00:00+08:00", post_id))
+        self.window.journal_account_key = ACCOUNT_KEY
+        self.window.show_page("journal")
+
+        selector = self.window.journal.year_selector
+        self.assertGreaterEqual(selector.findData(previous_year), 0)
+        selector.setCurrentIndex(selector.findData(previous_year))
+        self.assertEqual(self.window.journal.selected_year, previous_year)
+        self.assertEqual(self.window.journal.activity_summary.text(),
+                         f"{previous_year} 年 1 篇")
+        self.assertEqual(self.window.journal.heatmap._activity[date(previous_year, 6, 12)], 1)
+        self.assertEqual(self.window.journal.page_note.text(), "共 1 篇 · 每页 10 篇")
+
+        self.window.refresh_journal()
+        self.assertEqual(self.window.journal.selected_year, previous_year)
+        self.window.journal_account_key = (999999, "other-USC")
+        self.window.refresh_journal()
+        self.assertEqual(self.window.journal.selected_year, date.today().year)
+        self.assertEqual(self.window.journal.activity_summary.text(),
+                         f"{date.today().year} 年 0 篇")
 
     def test_publish_rechecks_multiple_live_positions_without_trading(self):
         self.window.connected = True

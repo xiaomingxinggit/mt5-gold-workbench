@@ -105,6 +105,44 @@ class JournalRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.activity(ACCOUNT_A, days=7)[date.today()], 12)
         self.assertEqual(sum(self.repo.activity(None, days=7).values()), 0)
 
+    def test_calendar_year_activity_and_available_years_are_account_scoped(self):
+        leap_day = self.repo.create_post(ACCOUNT_A, "leap day")
+        another_leap_day = self.repo.create_post(ACCOUNT_A, "same day")
+        new_year = self.repo.create_post(ACCOUNT_A, "new year")
+        other_login = self.repo.create_post(ACCOUNT_B, "other login")
+        other_server = self.repo.create_post(ACCOUNT_C, "other server")
+        with closing(sqlite3.connect(self.repo.db_path)) as db, db:
+            db.executemany(
+                "UPDATE posts SET created_at=? WHERE id=?",
+                [
+                    ("2024-02-29T10:00:00+08:00", leap_day),
+                    ("2024-02-29T11:00:00+08:00", another_leap_day),
+                    ("2025-01-01T00:00:00+08:00", new_year),
+                    ("2024-12-31T23:59:00+08:00", other_login),
+                    ("2023-07-01T09:00:00+08:00", other_server),
+                ],
+            )
+
+        self.assertEqual(self.repo.available_years(ACCOUNT_A), (2025, 2024))
+        self.assertEqual(self.repo.available_years(ACCOUNT_B), (2024,))
+        self.assertEqual(self.repo.available_years(ACCOUNT_C), (2023,))
+        self.assertEqual(self.repo.available_years(None), ())
+
+        leap_activity = self.repo.activity_year(ACCOUNT_A, 2024)
+        self.assertEqual(len(leap_activity), 366)
+        self.assertEqual(leap_activity[date(2024, 2, 29)], 2)
+        self.assertEqual(leap_activity[date(2024, 12, 31)], 0)
+        self.assertEqual(sum(leap_activity.values()), 2)
+        regular_activity = self.repo.activity_year(ACCOUNT_A, 2025)
+        self.assertEqual(len(regular_activity), 365)
+        self.assertEqual(regular_activity[date(2025, 1, 1)], 1)
+        self.assertEqual(sum(self.repo.activity_year(None, 2024).values()), 0)
+
+    def test_calendar_year_activity_rejects_invalid_years(self):
+        for year in (True, 0, 10000, "2024"):
+            with self.subTest(year=year), self.assertRaises(ValueError):
+                self.repo.activity_year(ACCOUNT_A, year)
+
     def test_data_survives_reopening_database(self):
         post_id = self.repo.create_post(ACCOUNT_A, "persistent", positions=[snapshot(33)])
         reopened = JournalRepository(self.root / "journal")
