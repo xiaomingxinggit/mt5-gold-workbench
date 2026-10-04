@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mt5-workbench"
+version = "0.1.0"
+description = "XAUUSDc USC account workbench for MetaTrader 5"
+requires-python = ">=3.12,<3.13"
+dynamic = ["dependencies"]
+
+[project.gui-scripts]
+mt5-workbench = "mt5_workbench.ui.main_window:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"mt5_workbench.ui" = [
+    "resources/icons/*.png",
+    "resources/icons/svg/dark/*.svg",
+    "resources/icons/svg/light/*.svg",
+]

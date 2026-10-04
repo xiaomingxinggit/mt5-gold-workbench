@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+state/
+*.egg-info/
+build/
+dist/
+.env
+.env.*
+*.db
+*.sqlite*
+*.log
+*.csv
+*.xlsx
+exports/
+reports/

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<circle cx="12" cy="12" r="3.6" fill="none" stroke="#CFD9E7" stroke-width="1.8"/>
+<polyline points="19.2,12 21.2,12" fill="none" stroke="#CFD9E7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="17.1,17.1 18.5,18.5" fill="none" stroke="#CFD9E7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="12,19.2 12,21.2" fill="none" stroke="#CFD9E7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="6.91,17.1 5.49,18.5" fill="none" stroke="#CFD9E7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="4.8,12 2.8,12" fill="none" stroke="#CFD9E7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="6.91,6.91 5.49,5.49" fill="none" stroke="#CFD9E7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="12,4.8 12,2.8" fill="none" stroke="#CFD9E7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="17.1,6.91 18.5,5.49" fill="none" stroke="#CFD9E7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
