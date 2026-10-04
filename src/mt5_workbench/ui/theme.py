@@ -62,21 +62,18 @@ THEMES: dict[str, dict[str, str]] = {
     },
 }
 
-FONT_FAMILIES = ("Noto Sans SC", "Microsoft YaHei UI", "Segoe UI")
-FONT_FAMILY = FONT_FAMILIES[0]
-FONT_CSS = ", ".join(f"'{family}'" for family in FONT_FAMILIES)
-# Use a consistent 4 px type scale.  At common 125% Windows scaling each
-# size maps to whole physical pixels, avoiding the half-pixel rasterisation
-# of the previous 13/14/15/23/27 px sizes.  Qt handles high DPI scaling.
+FONT_FAMILY = "Microsoft YaHei UI"
+# Qt widgets use pixel sizes throughout.  Keeping the scale here prevents
+# platform DPI settings from mixing point and pixel measurements in one view.
 FONT_SIZES = {
-    "caption": 16,
-    "body": 16,
-    "label": 16,
-    "subtitle": 16,
-    "section": 20,
-    "page": 28,
-    "metric": 24,
-    "brand": 20,
+    "caption": 13,
+    "body": 14,
+    "label": 14,
+    "subtitle": 15,
+    "section": 16,
+    "page": 27,
+    "metric": 23,
+    "brand": 19,
 }
 SPACING = (4, 8, 12, 16, 24, 32, 40)
 WINDOW_GUTTER = 12
@@ -152,8 +149,7 @@ def save_theme(name: str) -> bool:
 
 def style_sheet(p: dict[str, str]) -> str:
     return f"""
-    QWidget {{ background: {p['bg']}; color: {p['text']};
-               font-family: {FONT_CSS}; }}
+    QWidget {{ background: {p['bg']}; color: {p['text']}; }}
     QLabel, QRadioButton {{ background: transparent; }}
     QMainWindow, QScrollArea, QStackedWidget {{ background: {p['bg']}; }}
     QFrame#sidebar, QFrame#header, QFrame#footer {{

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mt5_workbench.ui.theme import FONT_CSS, FONT_SIZES
+from mt5_workbench.ui.theme import FONT_FAMILY, FONT_SIZES
 from mt5_workbench.ui.components import icon
 
 
@@ -384,7 +384,7 @@ class ControlsPage(QWidget):
         self.setStyleSheet(f"""
             QWidget#controlsPage {{
                 background: {p['bg']}; color: {p['text']};
-                font-family: {FONT_CSS}; font-size: {FONT_SIZES['body']}px;
+                font-family: '{FONT_FAMILY}'; font-size: {FONT_SIZES['body']}px;
             }}
             QFrame#controlsCard {{ background: {p['surface']};
                 border: 1px solid {p['border']}; border-radius: 12px; }}

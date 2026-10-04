@@ -42,7 +42,7 @@ from mt5_workbench.ui.pages.journal import MarketJournalPage
 from mt5_workbench.ui.pages.optimizer import MODES, OptimizerPage
 from mt5_workbench.ui.pages.overview import OrdersPage
 from mt5_workbench.ui.theme import (
-    FONT_FAMILIES, FONT_SIZES, MAX_CONTENT_WIDTH, MIN_WINDOW_SIZE, SHELL_GAP,
+    FONT_FAMILY, FONT_SIZES, MAX_CONTENT_WIDTH, MIN_WINDOW_SIZE, SHELL_GAP,
     THEMES, WINDOW_GUTTER,
     load_theme, save_theme, style_sheet,
 )
@@ -205,7 +205,7 @@ class MainWindow(QMainWindow):
                 ("journal", "行情日志", "journal"),
                 ("optimizer", "下单管理", "allocation"),
                 ("controls", "控制面板", "controls"),
-                ("monitor", "行情监听", "chart-line")):
+                ("monitor", "实验行情监听", "chart-line")):
             control = button(title, self.theme, graphic, "nav")
             control.setCheckable(True)
             control.clicked.connect(lambda _checked=False, page=key: self.show_page(page))
@@ -283,7 +283,7 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         compact = self.width() < 1380
-        self.sidebar.setFixedWidth(156 if compact else 215)
+        self.sidebar.setFixedWidth(128 if compact else 215)
         self.workspace_caption.setVisible(not compact)
         self.side_symbol_label.setVisible(not compact)
         self.side_symbol.setVisible(not compact)
@@ -292,8 +292,7 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         app = QApplication.instance()
-        base_font = QFont()
-        base_font.setFamilies(FONT_FAMILIES)
+        base_font = QFont(FONT_FAMILY)
         base_font.setPixelSize(FONT_SIZES["body"])
         app.setFont(base_font)
         app.setStyleSheet(style_sheet(self.palette))

@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mt5_workbench.ui.theme import FONT_CSS, FONT_FAMILIES, FONT_SIZES
+from mt5_workbench.ui.theme import FONT_FAMILY, FONT_SIZES
 
 if TYPE_CHECKING:
     from mt5_workbench.domain.journal import JournalPage, PositionSnapshot
@@ -151,8 +151,7 @@ class ActivityHeatmap(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(QColor(p["muted"]))
-        font = QFont()
-        font.setFamilies(FONT_FAMILIES)
+        font = QFont(FONT_FAMILY)
         font.setPixelSize(FONT_SIZES["caption"])
         painter.setFont(font)
         x0, y0, cell, gap = self._geometry()
@@ -362,9 +361,9 @@ class PublishDialog(QDialog):
                       "check-light-16.png").as_posix()
         self.setStyleSheet(f"""
             QDialog#journalComposer {{ background: {p['bg']}; color: {p['text']};
-                font-family: {FONT_CSS}; font-size: {FONT_SIZES['body']}px; }}
+                font-family: '{FONT_FAMILY}'; font-size: {FONT_SIZES['body']}px; }}
             QDialog#journalComposer QLabel[role="dialog-title"] {{ color: {p['text']};
-                font-size: {FONT_SIZES['section']}px; font-weight: 700; }}
+                font-size: 22px; font-weight: 700; }}
             QDialog#journalComposer QLabel[role="field-label"] {{ color: {p['text']};
                 font-size: {FONT_SIZES['body']}px; font-weight: 700; }}
             QDialog#journalComposer QLabel[role="caption"] {{ color: {p['muted']};
@@ -853,7 +852,7 @@ class MarketJournalPage(QWidget):
             self._composer.set_palette(palette)
         self.setStyleSheet(f"""
             QWidget#journalPage {{ background: {p['bg']}; color: {p['text']};
-                font-family: {FONT_CSS}; font-size: {FONT_SIZES['body']}px; }}
+                font-family: '{FONT_FAMILY}'; font-size: {FONT_SIZES['body']}px; }}
             QWidget#journalPage QLabel {{ background: transparent; }}
             QWidget#journalPage QLabel[role="page-title"] {{ color: {p['text']};
                 font-size: {FONT_SIZES['page']}px; font-weight: 700; }}
@@ -868,9 +867,9 @@ class MarketJournalPage(QWidget):
                 font-size: {FONT_SIZES['metric']}px; font-weight: 700; }}
             QWidget#journalPage QLabel[role="post-author"],
             QWidget#journalPage QLabel[role="empty-title"] {{ color: {p['text']};
-                font-size: {FONT_SIZES['body']}px; font-weight: 700; }}
+                font-size: 14px; font-weight: 700; }}
             QWidget#journalPage QLabel[role="post-body"] {{ color: {p['text']};
-                font-size: {FONT_SIZES['body']}px; }}
+                font-size: 14px; }}
             QWidget#journalPage QLabel[role="position-name"] {{ color: {p['text']};
                 font-size: {FONT_SIZES['caption']}px; font-weight: 700; }}
             QWidget#journalPage QLabel[role="positive"] {{ color: {p['positive']};

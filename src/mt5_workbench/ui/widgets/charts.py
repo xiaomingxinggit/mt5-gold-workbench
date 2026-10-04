@@ -15,7 +15,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QToolTip, QWidget
 
-from mt5_workbench.ui.theme import FONT_FAMILIES, FONT_SIZES, THEMES
+from mt5_workbench.ui.theme import FONT_FAMILY, FONT_SIZES, THEMES
 
 
 _LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -96,8 +96,7 @@ class _Chart(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         painter.fillRect(self.rect(), QColor(self._colors["surface"]))
-        font = QFont()
-        font.setFamilies(FONT_FAMILIES)
+        font = QFont(FONT_FAMILY)
         font.setPixelSize(FONT_SIZES["caption"])
         painter.setFont(font)
         self._paint(painter, self.width(), self.height())
@@ -126,8 +125,7 @@ class _Chart(QWidget):
               width: float, height: float, value: Any,
               color: str = "muted", align: Any = _LEFT,
               bold: bool = False) -> None:
-        font = QFont()
-        font.setFamilies(FONT_FAMILIES)
+        font = QFont(FONT_FAMILY)
         font.setPixelSize(FONT_SIZES["caption"])
         font.setBold(bold)
         painter.setFont(font)

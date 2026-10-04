@@ -52,12 +52,12 @@ class GuiAccountGateTests(unittest.TestCase):
 
     def test_sidebar_names_stay_consistent_when_resized(self):
         window = self.new_window()
-        expected = ["总览看板", "交易概览", "行情日志", "下单管理", "控制面板", "行情监听"]
+        expected = ["总览看板", "交易概览", "行情日志", "下单管理", "控制面板", "实验行情监听"]
         for width, height in ((1200, 800), (2560, 1440)):
             window.resize(width, height)
             self.qt_app.processEvents()
             self.assertEqual([button.text() for button in window.nav.values()], expected)
-            self.assertEqual(window.sidebar.width(), 156 if width < 1380 else 215)
+            self.assertEqual(window.sidebar.width(), 128 if width < 1380 else 215)
         self.assertEqual((window.minimumWidth(), window.minimumHeight()), (1200, 800))
 
     def test_non_usc_account_locks_until_rechecked(self):
