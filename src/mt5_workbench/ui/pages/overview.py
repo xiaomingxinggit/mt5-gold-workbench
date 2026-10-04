@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from mt5_workbench.ui.widgets.charts import CashflowChart, ExecutionChart, StatusChart
-from mt5_workbench.ui.theme import FONT_FAMILY, FONT_SIZES
+from mt5_workbench.ui.theme import FONT_CSS, FONT_SIZES
 
 if TYPE_CHECKING:
     from mt5_workbench.services.order_analytics import DealRecord, OrderAnalytics, OrderRecord
@@ -604,17 +604,17 @@ class OrdersPage(QWidget):
         p = self._palette
         self.setStyleSheet(f"""
             QWidget#ordersPage {{ background: {p['bg']}; color: {p['text']};
-                font-family: '{FONT_FAMILY}'; font-size: {FONT_SIZES['body']}px; }}
+                font-family: {FONT_CSS}; font-size: {FONT_SIZES['body']}px; }}
             QFrame#ordersCard {{ background: {p['surface']};
                 border: 1px solid {p['border']}; border-radius: 12px; }}
             QFrame#ordersMetric {{ background: {p['surface_alt']};
                 border: 0; border-radius: 10px; }}
             QLabel {{ color: {p['text']}; background: transparent; border: none; }}
-            QLabel[role="page-title"] {{ font-size: 27px; font-weight: 700; }}
-            QLabel[role="section-title"] {{ font-size: 16px; font-weight: 700; }}
+            QLabel[role="page-title"] {{ font-size: {FONT_SIZES['page']}px; font-weight: 700; }}
+            QLabel[role="section-title"] {{ font-size: {FONT_SIZES['section']}px; font-weight: 700; }}
             QLabel[role="metric-title"] {{ color: {p['muted']};
                 font-size: {FONT_SIZES['caption']}px; font-weight: 700; }}
-            QLabel[role="metric-value"] {{ font-size: 23px; font-weight: 700; }}
+            QLabel[role="metric-value"] {{ font-size: {FONT_SIZES['metric']}px; font-weight: 700; }}
             QLabel[role="control-label"] {{ font-size: {FONT_SIZES['body']}px;
                 font-weight: 700; }}
             QLabel[role="caption"] {{ color: {p['muted']};
