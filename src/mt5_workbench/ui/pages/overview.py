@@ -487,6 +487,7 @@ class OrdersPage(QWidget):
     def _populate(table: QTableWidget, rows: tuple[Any, ...],
                   cells: Any) -> None:
         table.blockSignals(True)
+        table.setUpdatesEnabled(False)
         try:
             table.clearSelection()
             table.setRowCount(len(rows))
@@ -498,6 +499,7 @@ class OrdersPage(QWidget):
                         item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                     table.setItem(row_index, column, item)
         finally:
+            table.setUpdatesEnabled(True)
             table.blockSignals(False)
 
     def _selected(self, kind: str, table: QTableWidget) -> None:

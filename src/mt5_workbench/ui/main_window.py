@@ -98,6 +98,65 @@ def _run_journal_sync(repo: JournalRepository, account_key: tuple[int, str],
     results.put((generation, account_key, result, error))
 
 
+class _OrderAnalyticsCancelled(RuntimeError):
+    """Stop a superseded overview read between MT5 API calls."""
+
+
+class _CancellableOrderApi:
+    """Prevent a stale overview worker from starting another MT5 read."""
+
+    def __init__(self, api, cancelled: Event, identity: tuple[int, str]):
+        self._api = api
+        self._cancelled = cancelled
+        self._identity = identity
+
+    def __getattr__(self, name: str):
+        member = getattr(self._api, name)
+        if name not in {"orders_get", "positions_get", "history_orders_get",
+                        "history_deals_get"}:
+            return member
+
+        def guarded(*args, **kwargs):
+            if self._cancelled.is_set():
+                raise _OrderAnalyticsCancelled("交易概览读取已取消")
+            current = self._api.account_info()
+            if (current is None or not is_usc_account(current)
+                    or (current.login, current.server) != self._identity):
+                self._cancelled.set()
+                raise _OrderAnalyticsCancelled("交易概览读取期间账户已切换")
+            value = member(*args, **kwargs)
+            if self._cancelled.is_set():
+                raise _OrderAnalyticsCancelled("交易概览读取已取消")
+            current = self._api.account_info()
+            if (current is None or not is_usc_account(current)
+                    or (current.login, current.server) != self._identity):
+                self._cancelled.set()
+                raise _OrderAnalyticsCancelled("交易概览读取期间账户已切换")
+            return value
+
+        return guarded
+
+
+def _run_order_analytics(account, symbol: str | None, days: int,
+                         identity: tuple[int, str], generation: int,
+                         cancelled: Event, results: Queue) -> None:
+    """Read MT5 history without touching the GUI from the worker thread."""
+    data = None
+    error = ""
+    try:
+        if cancelled.is_set():
+            raise _OrderAnalyticsCancelled("交易概览读取已取消")
+        data = load_order_analytics(
+            account, symbol=symbol, days=days,
+            api=_CancellableOrderApi(mt5, cancelled, identity),
+        )
+        if cancelled.is_set():
+            raise _OrderAnalyticsCancelled("交易概览读取已取消")
+    except Exception as exc:
+        error = str(exc)
+    results.put((generation, identity, symbol, days, data, error))
+
+
 
 class MainWindow(QMainWindow):
     def __init__(self, symbol_name: str = DEFAULT_SYMBOL,
@@ -124,6 +183,14 @@ class MainWindow(QMainWindow):
         self.last_books = 0.0
         self.last_dashboard = 0.0
         self.last_analytics = 0.0
+        self._order_analytics_generation = 0
+        self._order_analytics_thread: Thread | None = None
+        self._order_analytics_cancel: Event | None = None
+        self._order_analytics_results: Queue = Queue()
+        self._order_analytics_pending = None
+        self._order_analytics_key = None
+        self._order_analytics_next = None
+        self._order_analytics_display_key = None
         self.last_journal_sync = 0.0
         self.journal_account_key: tuple[int, str] | None = None
         self.journal_error = ""
@@ -149,6 +216,9 @@ class MainWindow(QMainWindow):
         self._journal_sync_poll = QTimer(self)
         self._journal_sync_poll.setInterval(100)
         self._journal_sync_poll.timeout.connect(self._consume_journal_sync_result)
+        self._order_analytics_poll = QTimer(self)
+        self._order_analytics_poll.setInterval(100)
+        self._order_analytics_poll.timeout.connect(self._consume_order_analytics_result)
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.poll)
@@ -214,6 +284,8 @@ class MainWindow(QMainWindow):
         self.nav["dashboard"].setChecked(True)
         self.side_symbol_label = label("观察品种", kind="muted")
         self.side_symbol = label(self.symbol_name, size=15, bold=True)
+        self.side_symbol_label.setContentsMargins(34, 0, 0, 0)
+        self.side_symbol.setContentsMargins(34, 0, 0, 0)
         side.addSpacing(28)
         side.addWidget(self.side_symbol_label)
         side.addWidget(self.side_symbol)
@@ -257,7 +329,8 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.refresh_note)
         shell.addWidget(footer)
 
-        self.order_page.refresh_requested.connect(self.refresh_order_analytics)
+        self.order_page.refresh_requested.connect(
+            lambda: self.refresh_order_analytics(force=True))
         self.journal.refresh_requested.connect(lambda: self.refresh_journal(force_sync=True))
         self.journal.year_requested.connect(self._journal_year_requested)
         self.journal.page_requested.connect(self._journal_page_requested)
@@ -301,18 +374,22 @@ class MainWindow(QMainWindow):
         self.fullscreen_button.setIcon(icon("exit-fullscreen" if self.fullscreen
                                            else "fullscreen", self.theme))
         self.reconnect_button.setIcon(icon("refresh", self.theme))
-        for key, graphic in (("dashboard", "dashboard"), ("orders", "orders"),
-                              ("journal", "journal"),
-                              ("optimizer", "allocation"), ("controls", "controls"),
-                              ("monitor", "chart-line")):
-            selected = "-active" if self.current_page == key else ""
-            self.nav[key].setIcon(icon(graphic + selected, self.theme, 24))
+        self._update_nav_icons(self.nav)
         self.dashboard.set_palette(self.palette, self.theme)
         self.order_page.set_palette(self.palette)
         self.journal.set_palette(self.palette)
         self.optimizer.set_palette(self.palette, self.theme)
         self.controls.set_palette(self.palette)
         self.monitor.set_palette(self.palette)
+
+    def _update_nav_icons(self, keys) -> None:
+        graphics = {
+            "dashboard": "dashboard", "orders": "orders", "journal": "journal",
+            "optimizer": "allocation", "controls": "controls", "monitor": "chart-line",
+        }
+        for key in keys:
+            selected = "-active" if self.current_page == key else ""
+            self.nav[key].setIcon(icon(graphics[key] + selected, self.theme, 24))
 
     def toggle_theme(self) -> None:
         if self.account_lock is not None or (self.connected and not self.check_account_access()):
@@ -343,11 +420,13 @@ class MainWindow(QMainWindow):
     def show_page(self, name: str) -> None:
         if self.account_lock is not None or (self.connected and not self.check_account_access()):
             return
+        previous = self.current_page
         self.current_page = name
         self.stack.setCurrentWidget(self.pages[name])
         for key, control in self.nav.items():
             control.setChecked(key == name)
-        self._apply_theme()
+        if previous != name:
+            self._update_nav_icons((previous, name))
         if name == "dashboard" and self.connected and self.tick is not None and (
                 time.monotonic() - self.last_dashboard >= 60):
             self.refresh_dashboard_data()
@@ -361,12 +440,14 @@ class MainWindow(QMainWindow):
             self.refresh_monitor()
 
     def _shutdown(self) -> None:
+        self._cancel_order_analytics()
         self._cancel_journal_sync()
         if self.initialized:
             mt5.shutdown()
             self.initialized = False
 
     def _clear_session(self, note: str) -> None:
+        self._cancel_order_analytics()
         self._cancel_journal_sync()
         self.connected = False
         self.account = None
@@ -481,6 +562,7 @@ class MainWindow(QMainWindow):
             return
         if self.account is not None and (account.login, account.server) != (
                 self.account.login, self.account.server):
+            self._cancel_order_analytics()
             self._cancel_journal_sync()
             self.journal.dismiss_composer()
             if self.active_dialog is not None:
@@ -587,7 +669,43 @@ class MainWindow(QMainWindow):
             self.dashboard.set_tick(self.symbol, self.tick, data.previous_close,
                                     bool(terminal and terminal.trade_allowed))
 
-    def refresh_order_analytics(self) -> None:
+    def _cancel_order_analytics(self) -> None:
+        """Invalidate a read without waiting for a blocking MT5 call."""
+        self._order_analytics_generation += 1
+        if self._order_analytics_cancel is not None:
+            self._order_analytics_cancel.set()
+        self._order_analytics_next = None
+        self._order_analytics_display_key = None
+        self.last_analytics = 0.0
+
+    def _start_order_analytics(self, account, key: tuple) -> None:
+        """Start at most one background history read for this window."""
+        identity, symbol, days = key
+        cancelled = Event()
+        thread = Thread(
+            target=_run_order_analytics,
+            args=(account, symbol, days, identity, self._order_analytics_generation,
+                  cancelled, self._order_analytics_results),
+            name="mt5-order-analytics", daemon=True,
+        )
+        self._order_analytics_thread = thread
+        self._order_analytics_cancel = cancelled
+        self._order_analytics_key = key
+        self.last_analytics = time.monotonic()
+        try:
+            thread.start()
+        except RuntimeError:
+            self._order_analytics_thread = None
+            self._order_analytics_cancel = None
+            self._order_analytics_key = None
+            self.last_analytics = 0.0
+            raise
+        self._order_analytics_poll.start()
+
+    def refresh_order_analytics(self, *, force: bool = False) -> None:
+        """Queue a read-only refresh; the Qt event loop stays responsive."""
+        if self._closing:
+            return
         if not self.connected or self.account is None:
             self.order_page.clear("请先连接 MT5")
             return
@@ -595,20 +713,68 @@ class MainWindow(QMainWindow):
             return
         symbol, days = self.order_page.filters()
         identity = (self.account.login, self.account.server)
-        try:
-            data = load_order_analytics(self.account, symbol=symbol, days=days)
-            current = mt5.account_info()
-            if current is not None and not is_usc_account(current):
-                self._lock_unsupported(current)
+        key = (identity, symbol, days)
+        if self._order_analytics_thread is not None:
+            if self._order_analytics_next == key:
                 return
-            if current is None or (current.login, current.server) != identity:
-                raise RuntimeError("读取期间账户已切换，已丢弃本次订单数据")
-        except (RuntimeError, ValueError, OSError) as exc:
-            self.order_page.clear(f"订单读取失败：{exc}")
+            if (not force and self._order_analytics_next is None
+                    and self._order_analytics_key == key
+                    and self._order_analytics_cancel is not None
+                    and not self._order_analytics_cancel.is_set()):
+                return
+            self._order_analytics_generation += 1
+            if self._order_analytics_cancel is not None:
+                self._order_analytics_cancel.set()
+            self._order_analytics_next = key
             self.last_analytics = time.monotonic()
+        else:
+            try:
+                self._start_order_analytics(self.account, key)
+            except RuntimeError as exc:
+                self.order_page.clear(f"订单读取无法启动：{exc}")
+                return
+        if key != self._order_analytics_display_key:
+            self.order_page.clear("正在读取当前账户的交易记录…")
+        else:
+            self.order_page.updated_label.setText("正在刷新交易记录…")
+
+    def _consume_order_analytics_result(self) -> None:
+        """Render only a current-account/current-filter result on the GUI thread."""
+        if self._order_analytics_pending is None:
+            try:
+                self._order_analytics_pending = self._order_analytics_results.get_nowait()
+            except Empty:
+                return
+        thread = self._order_analytics_thread
+        if thread is not None and thread.is_alive():
             return
-        self.order_page.set_data(data, self.account)
+        generation, identity, symbol, days, data, error = self._order_analytics_pending
+        self._order_analytics_pending = None
+        self._order_analytics_thread = None
+        self._order_analytics_cancel = None
+        self._order_analytics_key = None
+        self._order_analytics_poll.stop()
+        if self._closing:
+            return
+        if self._order_analytics_next is not None:
+            self._order_analytics_next = None
+            self.refresh_order_analytics()
+            return
+        current_identity = ((self.account.login, self.account.server)
+                            if self.account is not None else None)
+        if (generation != self._order_analytics_generation or not self.connected
+                or current_identity != identity or self.order_page.filters() != (symbol, days)):
+            if self.connected and self.current_page == "orders":
+                self.refresh_order_analytics()
+            return
+        if not self.check_account_access() or generation != self._order_analytics_generation:
+            return
         self.last_analytics = time.monotonic()
+        if error:
+            self.order_page.clear(f"订单读取失败：{error}")
+            return
+        self._order_analytics_display_key = (identity, symbol, days)
+        self.order_page.set_data(data, self.account)
         self.status_label.setText("交易概览已更新" if not data.errors else
                                   "交易概览已更新，部分 MT5 数据不可用")
 
@@ -1127,6 +1293,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._closing = True
         self.timer.stop()
+        self._order_analytics_poll.stop()
+        self._cancel_order_analytics()
         self._journal_sync_poll.stop()
         self._cancel_journal_sync()
         self.journal.dismiss_composer()
