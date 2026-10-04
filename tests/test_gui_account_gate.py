@@ -52,7 +52,7 @@ class GuiAccountGateTests(unittest.TestCase):
 
     def test_sidebar_names_stay_consistent_when_resized(self):
         window = self.new_window()
-        expected = ["总览看板", "交易概览", "行情日志", "下单管理", "控制面板", "实验行情监听"]
+        expected = ["总览看板", "交易概览", "行情日志", "下单管理", "控制面板", "实验功能"]
         for width, height in ((1200, 800), (2560, 1440)):
             window.resize(width, height)
             self.qt_app.processEvents()

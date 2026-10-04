@@ -205,7 +205,7 @@ class MainWindow(QMainWindow):
                 ("journal", "行情日志", "journal"),
                 ("optimizer", "下单管理", "allocation"),
                 ("controls", "控制面板", "controls"),
-                ("monitor", "实验行情监听", "chart-line")):
+                ("monitor", "实验功能", "chart-line")):
             control = button(title, self.theme, graphic, "nav")
             control.setCheckable(True)
             control.clicked.connect(lambda _checked=False, page=key: self.show_page(page))
