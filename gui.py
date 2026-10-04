@@ -9,7 +9,8 @@ from pathlib import Path
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from mt5_workbench.ui.main_window import App, MainWindow, main, state_directory
+from mt5_workbench.ui.main_window import App, MainWindow, state_directory
+from mt5_workbench.ui.qml_app import main
 
 
 if __name__ == "__main__":

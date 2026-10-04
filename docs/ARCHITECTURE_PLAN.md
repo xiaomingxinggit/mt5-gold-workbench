@@ -1,5 +1,11 @@
 # MT5 工作台桌面应用整理计划
 
+> 此文档记录最初的 QWidget 工程整理基线。当前开发分支 `codex/qml-ui-redesign`
+> 已将默认入口切换为 `ui/qml_app.py`，六页由 `ui/qml/` 渲染；只读状态桥接见
+> `ui/qml_bridge.py`，确认后的写操作见 `ui/qml_trade_bridge.py`。旧 QWidget
+> 文件仍在仓库中，但不再由默认入口加载。新界面仍需在真实 Windows 显示器上
+> 验收字号、DPI、2K 布局和目标终端的响应速度。
+
 ## 目标与边界
 
 把当前平铺在项目根目录的脚本整理为可安装、可测试、可维护的 Windows Python 桌面应用。保持 PySide6 6.11.2、`XAUUSDc` 单品种、USC 美分账户限制、日夜主题和现有五个页面。整理期间不改变仓位算法、订单确认规则或真实交易行为；自动测试只使用模拟 MT5。

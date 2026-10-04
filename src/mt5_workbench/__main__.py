@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from mt5_workbench.ui.main_window import main
+from mt5_workbench.ui.qml_app import main
 
 
 if __name__ == "__main__":
