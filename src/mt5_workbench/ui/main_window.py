@@ -28,6 +28,7 @@ from mt5_workbench.infrastructure.market import orders, positions, symbol_and_ti
 from mt5_workbench.services.account_controls import close_request, execute_batch, load_targets
 from mt5_workbench.services.dashboard_data import DashboardData, load_dashboard
 from mt5_workbench.services.order_analytics import load_order_analytics
+from mt5_workbench.services.ema_monitor import fetch_m1_ema_snapshot
 from mt5_workbench.services.journal_positions import load_open_positions, sync_closed_positions
 from mt5_workbench.services.trade_execution import (
     build_requests, check_requests, existing_duplicates, send_checked,
@@ -36,6 +37,7 @@ from mt5_workbench.ui.components import button, icon, label, make_table, fill_ta
 from mt5_workbench.ui.dialogs.account_lock import AccountLockDialog
 from mt5_workbench.ui.pages.controls import ControlsPage
 from mt5_workbench.ui.pages.dashboard import DashboardPage
+from mt5_workbench.ui.pages.ema_monitor import EmaMonitorPage
 from mt5_workbench.ui.pages.journal import MarketJournalPage
 from mt5_workbench.ui.pages.optimizer import MODES, OptimizerPage
 from mt5_workbench.ui.pages.overview import OrdersPage
@@ -202,7 +204,8 @@ class MainWindow(QMainWindow):
                 ("orders", "交易概览", "orders"),
                 ("journal", "行情日志", "journal"),
                 ("optimizer", "下单管理", "allocation"),
-                ("controls", "控制面板", "controls")):
+                ("controls", "控制面板", "controls"),
+                ("monitor", "实验行情监听", "chart-line")):
             control = button(title, self.theme, graphic, "nav")
             control.setCheckable(True)
             control.clicked.connect(lambda _checked=False, page=key: self.show_page(page))
@@ -226,9 +229,11 @@ class MainWindow(QMainWindow):
         self.journal = MarketJournalPage(self.palette)
         self.optimizer = OptimizerPage(self.palette, self.theme)
         self.controls = ControlsPage(self.symbol_name, self.palette)
+        self.monitor = EmaMonitorPage(self.symbol_name, self.palette)
         for key, page in (("dashboard", self.dashboard), ("orders", self.order_page),
-                          ("journal", self.journal),
-                          ("optimizer", self.optimizer), ("controls", self.controls)):
+                           ("journal", self.journal),
+                           ("optimizer", self.optimizer), ("controls", self.controls),
+                           ("monitor", self.monitor)):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -247,7 +252,7 @@ class MainWindow(QMainWindow):
         footer_layout.setContentsMargins(24, 8, 24, 9)
         self.status_label = label("等待连接 MT5", kind="muted", size=FONT_SIZES["caption"])
         footer_layout.addWidget(self.status_label, 1)
-        self.refresh_note = label("报价 1 秒 · 持仓 5 秒 · 订单 30 秒 · 图表 60 秒",
+        self.refresh_note = label("报价/监听 1 秒 · 持仓 5 秒 · 订单 30 秒 · 图表 60 秒",
                                   kind="muted", size=FONT_SIZES["caption"])
         footer_layout.addWidget(self.refresh_note)
         shell.addWidget(footer)
@@ -260,6 +265,8 @@ class MainWindow(QMainWindow):
         self.journal.delete_requested.connect(self.delete_journal_post)
         self.controls.refresh_requested.connect(self.refresh_controls)
         self.controls.preview_requested.connect(self.preview_control)
+        self.monitor.refresh_requested.connect(self.refresh_monitor)
+        self.monitor.tolerance_changed.connect(self._monitor_tolerance_changed)
         self.optimizer.calculate_requested.connect(self.calculate)
         self.optimizer.preview_requested.connect(self.preview_orders)
         self.optimizer.copy_requested.connect(self.copy_result)
@@ -295,8 +302,9 @@ class MainWindow(QMainWindow):
                                            else "fullscreen", self.theme))
         self.reconnect_button.setIcon(icon("refresh", self.theme))
         for key, graphic in (("dashboard", "dashboard"), ("orders", "orders"),
-                             ("journal", "journal"),
-                             ("optimizer", "allocation"), ("controls", "controls")):
+                              ("journal", "journal"),
+                              ("optimizer", "allocation"), ("controls", "controls"),
+                              ("monitor", "chart-line")):
             selected = "-active" if self.current_page == key else ""
             self.nav[key].setIcon(icon(graphic + selected, self.theme, 24))
         self.dashboard.set_palette(self.palette, self.theme)
@@ -304,6 +312,7 @@ class MainWindow(QMainWindow):
         self.journal.set_palette(self.palette)
         self.optimizer.set_palette(self.palette, self.theme)
         self.controls.set_palette(self.palette)
+        self.monitor.set_palette(self.palette)
 
     def toggle_theme(self) -> None:
         if self.account_lock is not None or (self.connected and not self.check_account_access()):
@@ -348,6 +357,8 @@ class MainWindow(QMainWindow):
             self.refresh_journal(force_sync=True)
         if name == "controls" and self.connected:
             self.refresh_controls()
+        if name == "monitor" and self.connected:
+            self.refresh_monitor()
 
     def _shutdown(self) -> None:
         self._cancel_journal_sync()
@@ -371,6 +382,7 @@ class MainWindow(QMainWindow):
         self.dashboard.clear(note)
         self.order_page.clear(note)
         self.controls.clear(note)
+        self.monitor.clear(note)
         self.journal.set_can_publish(False)
         self.journal.set_notice(note)
         self.invalidate_result("连接已断开，请重新连接并计算。")
@@ -455,6 +467,8 @@ class MainWindow(QMainWindow):
                 self.refresh()
             except (RuntimeError, ValueError, OSError) as exc:
                 self.status_label.setText(f"刷新失败：{exc}")
+                if self.current_page == "monitor":
+                    self.monitor.set_snapshot({"status": "error", "reason": f"行情刷新失败：{exc}"})
 
     def refresh(self, *, force: bool = False) -> None:
         terminal = mt5.terminal_info()
@@ -475,6 +489,7 @@ class MainWindow(QMainWindow):
             self.dashboard_data = None
             self.last_dashboard = self.last_analytics = 0.0
             self.order_page.clear("账户已切换，正在读取新账户的记录")
+            self.monitor.clear("账户已切换，正在读取新账户的行情")
             self.invalidate_result("账户已切换，请重新计算配置。")
             self.status_label.setText("账户已切换，原交易预览已取消")
         self.account = account
@@ -505,6 +520,7 @@ class MainWindow(QMainWindow):
             self.dashboard_data = None
             self.last_dashboard = 0.0
             self.dashboard.clear_market()
+            self.monitor.set_snapshot({"status": "error", "reason": f"行情读取失败：{exc}"})
             self.dashboard.dashboard_note.setText(f"行情读取失败：{exc}")
             self.status_label.setText(f"行情读取失败：{exc}")
             return
@@ -514,6 +530,8 @@ class MainWindow(QMainWindow):
                                 terminal.trade_allowed)
         if force or (self.current_page == "dashboard" and now - self.last_dashboard >= 60):
             self.refresh_dashboard_data()
+        if self.current_page == "monitor" and self.connected:
+            self.refresh_monitor()
         if self.connected:
             self.check_account_access()
 
@@ -525,6 +543,31 @@ class MainWindow(QMainWindow):
         if not self.check_account_access():
             return
         self.dashboard.set_books(active, pending)
+
+    def _monitor_tolerance_changed(self, _value: float) -> None:
+        if self.current_page == "monitor" and self.connected:
+            self.refresh_monitor()
+
+    def refresh_monitor(self) -> None:
+        """Read one M1 EMA snapshot for the visible, authorised account."""
+        if not self.connected or self.account is None:
+            self.monitor.clear("请先连接 USC 美分账户")
+            return
+        if not self.check_account_access():
+            return
+        identity = (self.account.login, self.account.server)
+        try:
+            snapshot = fetch_m1_ema_snapshot(
+                self.symbol_name, tolerance_points=self.monitor.tolerance_points)
+        except (RuntimeError, ValueError, OSError) as exc:
+            self.monitor.set_snapshot({"status": "error", "reason": f"EMA 行情读取失败：{exc}"})
+            return
+        if not self.check_account_access():
+            return
+        if (self.account.login, self.account.server) != identity:
+            self.monitor.clear("账户已切换，请重新读取行情")
+            return
+        self.monitor.set_snapshot(snapshot)
 
     def refresh_dashboard_data(self) -> None:
         if self.account is None or self.tick is None or not self.check_account_access():

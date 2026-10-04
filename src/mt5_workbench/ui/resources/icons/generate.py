@@ -262,7 +262,7 @@ NAMES = ("dashboard", "orders", "allocation", "controls", "journal",
          "copy", "calculate", "close", "remove", "connection", "warning",
          "check", "info", "calendar", "chart-line", "candles", "bar-chart",
          "status", "confirm", "cancel")
-ACTIVE_NAMES = ("dashboard", "orders", "allocation", "controls", "journal")
+ACTIVE_NAMES = ("dashboard", "orders", "allocation", "controls", "journal", "chart-line")
 
 
 def main() -> None:

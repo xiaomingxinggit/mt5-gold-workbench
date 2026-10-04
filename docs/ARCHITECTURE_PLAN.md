@@ -31,7 +31,7 @@ MT5Test/
 │  ├─ infrastructure/             # MT5 行情适配；统一 gateway 后续实施
 │  └─ ui/
 │     ├─ main_window.py           # 导航、账户门禁与页面协调
-│     ├─ pages/                   # 总览、交易概览、行情日志、下单管理、控制面板
+│     ├─ pages/                   # 总览、交易概览、行情日志、下单管理、控制面板、实验行情监听
 │     ├─ widgets/                 # 图表控件
 │     ├─ dialogs/                 # 账户锁定弹窗
 │     ├─ theme.py                 # 设计 token 与主题切换

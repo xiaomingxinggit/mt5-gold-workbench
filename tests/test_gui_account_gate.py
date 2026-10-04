@@ -52,7 +52,7 @@ class GuiAccountGateTests(unittest.TestCase):
 
     def test_sidebar_names_stay_consistent_when_resized(self):
         window = self.new_window()
-        expected = ["总览看板", "交易概览", "行情日志", "下单管理", "控制面板"]
+        expected = ["总览看板", "交易概览", "行情日志", "下单管理", "控制面板", "实验行情监听"]
         for width, height in ((1200, 800), (2560, 1440)):
             window.resize(width, height)
             self.qt_app.processEvents()
@@ -129,6 +129,38 @@ class GuiAccountGateTests(unittest.TestCase):
             self.assertFalse(window.connected)
             self.assertIsNotNone(window.account_lock)
             read_history.assert_not_called()
+
+    def test_monitor_is_last_page_and_read_only_account_gated(self):
+        window = self.new_window()
+        self.assertEqual(list(window.nav)[-1], "monitor")
+        window.connected = True
+        window.account = account("USC")
+        snapshot = SimpleNamespace(
+            status="live", reason="EMA 尚未靠拢", aligned=False,
+            ema_values={7: 4200, 14: 4200, 30: 4200, 60: 4200},
+            ema_spread_points=0, bid=4200, ask=4200.2,
+            quote_age_seconds=1, bar_time=None, observed_at=None,
+            includes_forming_bar=True,
+        )
+        with (
+            patch.object(window, "check_account_access", return_value=True),
+            patch.object(qt_gui, "fetch_m1_ema_snapshot", return_value=snapshot) as read,
+        ):
+            window.show_page("monitor")
+            read.assert_called_once_with("XAUUSDc", tolerance_points=5.0)
+            self.assertEqual(window.monitor.state_value.text(), "等待 EMA 聚拢")
+            self.assertFalse(window.nav["monitor"].icon().isNull())
+
+        with (
+            patch.object(qt_gui.mt5, "terminal_info", return_value=SimpleNamespace(connected=True)),
+            patch.object(qt_gui.mt5, "account_info", return_value=account("USD")),
+            patch.object(qt_gui.mt5, "shutdown"),
+            patch.object(qt_gui, "fetch_m1_ema_snapshot") as read,
+        ):
+            window.refresh_monitor()
+            read.assert_not_called()
+            self.assertFalse(window.connected)
+            self.assertEqual(window.monitor.bid_value.text(), "—")
 
     def test_cancelled_order_preview_never_sends(self):
         window = self.new_window()
