@@ -21,6 +21,7 @@ ApplicationWindow {
     property var overviewData: ({})
     property var journalData: ({})
     property var optimizerData: ({})
+    property var basicOrderData: ({})
     property var controlsData: ({})
     property var monitorData: ({})
     property var confirmation: ({})
@@ -40,6 +41,7 @@ ApplicationWindow {
         else if (name === "overview") overviewData = value || ({});
         else if (name === "journal") journalData = value || ({});
         else if (name === "optimizer") optimizerData = value || ({});
+        else if (name === "basicOrder") basicOrderData = value || ({});
         else if (name === "controls") controlsData = value || ({});
         else if (name === "monitor") monitorData = value || ({});
         else if (name === "confirmation") confirmation = value || ({});
@@ -361,6 +363,10 @@ ApplicationWindow {
                     OrderEntryView {
                         ui: theme
                         pageData: root.optimizerData
+                        basicData: root.basicOrderData
+                        market: root.market
+                        account: root.account
+                        connection: root.connection
                         bridge: root.backend
                     }
                     ControlView {

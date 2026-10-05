@@ -158,6 +158,7 @@ def _empty_state(symbol: str, theme: str) -> dict[str, Any]:
         "refreshIntervals": dict(DEFAULT_REFRESH_INTERVALS),
         "connection": {"connected": False, "locked": False, "message": "正在连接 MT5"},
         "account": {},
+        "basicOrder": {},
         "market": {"symbol": symbol, "bid": None, "ask": None,
                    "spreadPoints": None, "time": "", "change": None,
                    "changePct": None, "stale": True},

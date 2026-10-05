@@ -140,6 +140,116 @@ class QmlTradeBridgeTests(unittest.TestCase):
         self.assertEqual(api.sent, [])
         self.assertFalse(bridge.state["connection"]["connected"])
 
+    def test_basic_preview_cancel_and_optional_protection(self):
+        bridge, api = self.make_bridge()
+        fields = {"side": "SELL", "price": "4200", "volume": "0.01", "sl": "", "tp": ""}
+        bridge.perform("basicPreview", fields)
+        preview = bridge.state["confirmation"]
+        self.assertEqual(preview["title"], "确认基础限价单")
+        self.assertIn("风险未限定", preview["warning"])
+        self.assertEqual(api.sent, [])
+        bridge.perform("cancelConfirm", {})
+        self.assertEqual(api.sent, [])
+        bridge.perform("confirm", {"token": preview["token"]})
+        self.assertEqual(api.sent, [])
+
+    def test_basic_confirmation_sends_one_minimum_limit_once(self):
+        for side, price, sl, tp in (("BUY", "4190", "4180", "4200"),
+                                    ("SELL", "4200", "4210", "4190"),
+                                    ("SELL", "4200", "", "")):
+            with self.subTest(side=side):
+                bridge, api = self.make_bridge()
+                fields = {"side": side, "price": price, "volume": "0.01", "sl": sl, "tp": tp}
+                bridge.perform("basicPreview", fields)
+                self.assertEqual(bridge.state["basicOrder"]["risk"],
+                                 "0.10 USD" if sl else "未设止损，风险未限定")
+                token = bridge.state["confirmation"]["token"]
+                self.assertEqual(api.sent, [])
+                with tempfile.TemporaryDirectory() as temp, patch.object(
+                        module, "_records_dir", return_value=Path(temp)):
+                    bridge.perform("confirm", {"token": token})
+                    bridge.perform("confirm", {"token": token})
+                    self.assertEqual(len(api.sent), 1)
+                    self.assertEqual(api.sent[0]["action"], mt5.TRADE_ACTION_PENDING)
+                    self.assertEqual(api.sent[0]["volume"], 0.01)
+                    self.assertEqual(api.sent[0]["type"], mt5.ORDER_TYPE_BUY_LIMIT
+                                     if side == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT)
+                    self.assertEqual(api.sent[0]["sl"], float(sl or 0))
+                    self.assertEqual(api.sent[0]["tp"], float(tp or 0))
+
+    def test_basic_respects_symbol_constraints_and_account_policy(self):
+        for changes in ({"order_mode": 0}, {"order_mode": 2 | 32},
+                        {"order_mode": 2 | 16}, {"volume_min": 0.02},
+                        {"trade_mode": mt5.SYMBOL_TRADE_MODE_DISABLED},
+                        {"trade_stops_level": 500}, {"name": "XAUUSD"}):
+            with self.subTest(changes=changes):
+                bridge, api = self.make_bridge()
+                for key, value in changes.items():
+                    setattr(api.symbol, key, value)
+                bridge.perform("basicPreview", {"side": "SELL", "price": "4200",
+                              "volume": "0.01", "sl": "4210", "tp": "4190"})
+                self.assertTrue(bridge.state["basicOrder"]["error"])
+                self.assertEqual(bridge.state["confirmation"], {})
+                self.assertEqual(api.sent, [])
+        bridge, api = self.make_bridge()
+        api.current.currency = "USD"
+        bridge.perform("basicPreview", {"side": "SELL", "price": "4200",
+                      "volume": "0.01", "sl": "4210", "tp": ""})
+        self.assertTrue(bridge.state["connection"]["locked"])
+        self.assertEqual(api.sent, [])
+
+    def test_basic_confirmation_rechecks_account_quote_and_permissions(self):
+        for change in ("account", "quote", "permissions", "expired", "duplicate"):
+            with self.subTest(change=change):
+                bridge, api = self.make_bridge()
+                fields = {"side": "SELL", "price": "4200", "volume": "0.01", "sl": "4210", "tp": ""}
+                bridge.perform("basicPreview", fields)
+                token = bridge.state["confirmation"]["token"]
+                if change == "account":
+                    api.current = _account(202)
+                elif change == "permissions":
+                    api.current.trade_allowed = False
+                elif change == "duplicate":
+                    api.active_orders = (SimpleNamespace(ticket=88, symbol="XAUUSDc",
+                        type=mt5.ORDER_TYPE_SELL_LIMIT, price_open=4200,
+                        volume_initial=0.01, sl=4210, tp=0),)
+                else:
+                    api.symbol_info_tick = lambda _name: SimpleNamespace(
+                        bid=4201 if change == "quote" else 4194.9,
+                        ask=4202 if change == "quote" else 4195,
+                        time_msc=int((time.time() - (60 if change == "expired" else 0)) * 1000))
+                bridge.perform("confirm", {"token": token})
+                self.assertEqual(api.sent, [])
+                self.assertEqual(bridge.state["confirmation"], {})
+
+    def test_basic_field_edit_or_tab_switch_invalidates_confirmation(self):
+        for action in ("basicInvalidate", "entryTabChanged"):
+            bridge, api = self.make_bridge()
+            bridge.perform("basicPreview", {"side": "SELL", "price": "4200",
+                                           "volume": "0.01", "sl": "4210", "tp": ""})
+            token = bridge.state["confirmation"]["token"]
+            bridge.perform(action, {})
+            bridge.perform("confirm", {"token": token})
+            self.assertEqual(api.sent, [])
+
+    def test_basic_rejects_invalid_inputs_and_server_check_failure(self):
+        fields = {"side": "SELL", "price": "4200", "volume": "0.01", "sl": "4210", "tp": "4190"}
+        for patch_fields in ({"side": "MARKET"}, {"price": "4190"},
+                             {"volume": "0.015"}, {"price": "4200.001"},
+                             {"sl": "4190"}, {"tp": "4210"},
+                             {"volume": "NaN"}, {"price": "Infinity"}):
+            with self.subTest(fields=patch_fields):
+                bridge, api = self.make_bridge()
+                bridge.perform("basicPreview", {**fields, **patch_fields})
+                self.assertEqual(bridge.state["confirmation"], {})
+                self.assertTrue(bridge.state["basicOrder"]["error"])
+                self.assertEqual(api.sent, [])
+        bridge, api = self.make_bridge()
+        api.order_check = lambda _request: SimpleNamespace(retcode=10016, comment="invalid stops")
+        bridge.perform("basicPreview", fields)
+        self.assertEqual(bridge.state["confirmation"], {})
+        self.assertEqual(api.sent, [])
+
     def test_control_preview_never_closes_without_confirmation(self):
         bridge, api = self.make_bridge()
         api.active_positions = (SimpleNamespace(

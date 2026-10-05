@@ -8,8 +8,9 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
+os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3")
 
-from PySide6.QtCore import QPointF, QUrl
+from PySide6.QtCore import QPointF, QUrl, QMetaObject, Q_ARG
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -28,6 +29,7 @@ class QmlUiTests(unittest.TestCase):
     def test_six_pages_theme_and_window_size_load_without_mt5(self):
         bridge = QmlTradingBridge(autoconnect=False, start_timer=False,
                                   journal_repository=object())
+        bridge._set_state(theme="light")
         engine = QQmlApplicationEngine()
         qml_dir = Path(__file__).resolve().parents[1] / "src" / "mt5_workbench" / "ui" / "qml"
         engine.addImportPath(str(qml_dir))
@@ -44,6 +46,24 @@ class QmlUiTests(unittest.TestCase):
                 self.assertEqual(window.property("page"), page)
             bridge.perform("navigate", {"page": "optimizer"})
             self.app.processEvents()
+            entry_view = window.findChild(QQuickItem, "orderEntryView")
+            self.assertEqual(entry_view.property("currentTab"), 0)
+            for width in (1200, 1440, 2560):
+                window.setWidth(width)
+                self.app.processEvents()
+                form_card = window.findChild(QQuickItem, "basicOrderFormCard")
+                market_card = window.findChild(QQuickItem, "basicOrderMarketCard")
+                self.assertGreater(form_card.width(), 300)
+                form_pos = form_card.mapToScene(QPointF(0, 0))
+                market_pos = market_card.mapToScene(QPointF(0, 0))
+                if width == 1200:
+                    self.assertGreater(market_pos.y(), form_pos.y())
+                else:
+                    self.assertAlmostEqual(form_pos.y(), market_pos.y(), delta=2)
+                self.assertLessEqual(market_pos.x() + market_card.width(), width - 20)
+            QMetaObject.invokeMethod(entry_view, "selectTab", Q_ARG("QVariant", 1))
+            self.app.processEvents()
+            self.assertEqual(entry_view.property("currentTab"), 1)
             mode_selector = window.findChild(QQuickItem, "entryModeSelector")
             self.assertIsNotNone(mode_selector)
             self.assertEqual(mode_selector.property("displayText"),

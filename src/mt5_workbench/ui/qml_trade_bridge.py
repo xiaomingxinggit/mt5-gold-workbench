@@ -22,6 +22,7 @@ from mt5_workbench.services.account_controls import (
     close_request, execute_batch, load_targets,
 )
 from mt5_workbench.services.journal_positions import load_open_positions
+from mt5_workbench.services.basic_limit_order import basic_fields, build_basic_request
 from mt5_workbench.services.position_protection import (
     execute_protection_batch, prepare_protection,
 )
@@ -270,6 +271,46 @@ class QmlTradingBridge(QmlBridge):
         lines.append("仅供测算；未提交 MT5 订单。")
         QApplication.clipboard().setText("\n".join(lines))
         self._set_state(status="配置已复制到剪贴板")
+
+    def _basic_request(self, fields: dict):
+        account = self._require_account()
+        terminal = self._api.terminal_info()
+        if terminal is None or not terminal.connected or not terminal.trade_allowed:
+            raise RuntimeError("MT5 终端未连接或未允许自动交易")
+        symbol, tick = self._symbol_and_tick()
+        request, risk = build_basic_request(fields, account, symbol, tick, api=self._api)
+        if existing_duplicates((request,), api=self._api):
+            raise RuntimeError("已有相同挂单，请先核对 MT5")
+        return account, symbol, tick, request, risk
+
+    def _preview_basic_order(self, payload: dict) -> None:
+        self._clear_confirmation()
+        self._set_state(basicOrder={})
+        fields = basic_fields(payload)
+        account, symbol, tick, request, risk = self._basic_request(fields)
+        check_requests((request,), api=self._api)
+        if not self.check_account_access():
+            raise RuntimeError("账户已切换，预览已取消")
+        token = uuid4().hex
+        self._confirmation = {
+            "kind": "basic-order", "token": token, "fields": fields,
+            "account": (account.login, account.server), "requests": (request,),
+        }
+        risk_text = f"{risk:.2f} USD" if risk is not None else "未设止损，风险未限定"
+        self._set_state(basicOrder={"risk": risk_text, "message": "已通过挂单预检查"},
+                        confirmation={
+            "token": token, "title": "确认基础限价单", "heading": "发送挂单前核对",
+            "details": (f"账户 {account.login} · {account.server} · {account.currency}\n"
+                        f"{symbol.name} · Bid {tick.bid:.{symbol.digits}f} / "
+                        f"Ask {tick.ask:.{symbol.digits}f} · GTC 长期有效"),
+            "warning": ("确认后将发送 1 笔真实 LIMIT 挂单。" +
+                        ("未设置止损，亏损风险未限定。" if risk is None else "") +
+                        "估算未计入跳空、手续费及隔夜费；失败时不会自动重试。"),
+            "columns": ["类型", "限价", "手数", "止损", "止盈", "风险 USD"],
+            "rows": [[fields["side"] + " LIMIT", fields["price"], fields["volume"],
+                      fields["sl"] or "—", fields["tp"] or "—", risk_text]],
+            "confirmText": "确认发送", "danger": True,
+        })
 
     def _refresh_controls(self, scope: str, *, force: bool = False) -> None:
         account = self._require_account()
@@ -520,6 +561,14 @@ class QmlTradingBridge(QmlBridge):
             self._reset_plan("挂单已提交；请在总览看板核对挂单。")
             self._set_state(status=f"已提交 {len(sent)} 笔 LIMIT 挂单；请在 MT5 核对实际状态")
             self.perform("refresh", {})
+        elif preview["kind"] == "basic-order":
+            _account, _symbol, _tick, request, _risk = self._basic_request(preview["fields"])
+            if (request,) != preview["requests"]:
+                raise RuntimeError("挂单配置已变化，请重新预览")
+            sent = send_checked(account, (request,), _records_dir("executions"), api=self._api)
+            self._set_state(basicOrder={"message": "已提交 1 笔 LIMIT 挂单，请在 MT5 核对"},
+                            status=f"已提交 {len(sent)} 笔基础 LIMIT 挂单")
+            self.perform("refresh", {})
         elif preview["kind"] == "control":
             done = execute_batch(
                 preview["operation"], preview["scope"], self.symbol_name,
@@ -555,6 +604,8 @@ class QmlTradingBridge(QmlBridge):
             self.perform("journalRefresh", {})
 
     def _perform_protected(self, action: str, payload: dict) -> None:
+        confirming_basic = (action == "confirm" and self._confirmation is not None
+                            and self._confirmation["kind"] == "basic-order")
         try:
             if action == "entryCalculate":
                 self._calculate(payload)
@@ -564,6 +615,14 @@ class QmlTradingBridge(QmlBridge):
                 self._preview_orders(payload)
             elif action == "entryCopy":
                 self._copy_plan()
+            elif action == "basicPreview":
+                self._preview_basic_order(payload)
+            elif action == "basicInvalidate":
+                self._clear_confirmation()
+                self._set_state(basicOrder={})
+            elif action == "entryTabChanged":
+                self._reset_plan()
+                self._set_state(basicOrder={})
             elif action == "controlsRefresh":
                 self._refresh_controls(str(payload.get("scope", self._control_scope)), force=True)
             elif action == "controlsPreview":
@@ -585,7 +644,9 @@ class QmlTradingBridge(QmlBridge):
         except (RuntimeError, ValueError, TypeError, OSError, sqlite3.Error,
                 InvalidOperation) as exc:
             self._set_state(status=f"操作未完成：{exc}")
-            if action in {"entryCalculate", "entryPreview"}:
+            if action == "basicPreview" or confirming_basic:
+                self._set_state(basicOrder={"error": str(exc)})
+            elif action in {"entryCalculate", "entryPreview"}:
                 optimizer = dict(self.state.get("optimizer", {}))
                 optimizer["warning"] = str(exc)
                 self._set_state(optimizer=optimizer)
