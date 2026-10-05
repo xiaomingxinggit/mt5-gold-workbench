@@ -24,6 +24,17 @@ Item {
     function preview(kind) {
         root.request("controlsPreview", {"kind": kind, "scope": root.scope, "deviation": deviationInput.text})
     }
+    function validPositiveNumber(value) {
+        var content = String(value).trim()
+        return /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(content) && isFinite(Number(content)) && Number(content) > 0
+    }
+    function validBatchStops() {
+        var sl = stopLossInput.text.trim()
+        var tp = takeProfitInput.text.trim()
+        return (sl !== "" || tp !== "")
+                && (sl === "" || root.validPositiveNumber(sl))
+                && (tp === "" || root.validPositiveNumber(tp))
+    }
 
     ScrollView {
         id: viewport
@@ -44,7 +55,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 5
                     Text { text: "控制面板"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 28; font.weight: Font.DemiBold }
-                    Text { text: "选择范围并核对目标后再确认执行。平仓与撤单会影响真实账户。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 14 }
+                    Text { text: "选择范围、预览目标并确认。平仓、撤单和保护价修改都会影响真实账户。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 14 }
                 }
                 UiButton { ui: root.ui; text: "刷新目标"; variant: "secondary"; onClicked: root.request("controlsRefresh", {"scope": root.scope}) }
             }
@@ -59,18 +70,32 @@ Item {
                     Layout.fillWidth: true
                     spacing: 22
                     RadioButton {
+                        id: symbolScope
                         text: "仅当前品种 XAUUSDc"
                         checked: root.scope === "symbol"
                         onClicked: root.changeScope("symbol")
                         font.family: root.ui.fontFamily; font.pixelSize: 14
-                        palette.text: root.ui.text
+                        contentItem: Text {
+                            text: symbolScope.text
+                            color: root.ui.text
+                            font.family: root.ui.fontFamily; font.pixelSize: 14
+                            verticalAlignment: Text.AlignVCenter
+                            leftPadding: symbolScope.indicator.width + symbolScope.spacing
+                        }
                     }
                     RadioButton {
+                        id: accountScope
                         text: "整个账户 · 所有品种"
                         checked: root.scope === "account"
                         onClicked: root.changeScope("account")
                         font.family: root.ui.fontFamily; font.pixelSize: 14
-                        palette.text: root.ui.text
+                        contentItem: Text {
+                            text: accountScope.text
+                            color: root.ui.text
+                            font.family: root.ui.fontFamily; font.pixelSize: 14
+                            verticalAlignment: Text.AlignVCenter
+                            leftPadding: accountScope.indicator.width + accountScope.spacing
+                        }
                     }
                     Item { Layout.fillWidth: true }
                 }
@@ -127,6 +152,104 @@ Item {
                         ui: root.ui; text: "预览删除挂单"; variant: "danger"; Layout.fillWidth: true
                         enabled: root.value("canRemove", false)
                         onClicked: root.preview("remove")
+                    }
+                }
+                UiCard {
+                    objectName: "controlBreakevenCard"
+                    ui: root.ui
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    padding: 22
+                    spacing: 13
+                    SectionHeading { ui: root.ui; title: "一键推保本"; subtitle: "按所选范围，为每笔持仓设置可锁定约指定 USD 利润的止损。"; Layout.fillWidth: true }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        Text { text: "目标锁盈"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13 }
+                        TextField {
+                            id: beAmountInput
+                            Layout.preferredWidth: 110
+                            Layout.preferredHeight: 40
+                            text: "1"
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            selectByMouse: true
+                            color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 14
+                            leftPadding: 10; rightPadding: 10
+                            background: Rectangle { color: root.ui.surfaceAlt; radius: 9; border.color: beAmountInput.activeFocus ? root.ui.accent : root.ui.border }
+                        }
+                        Text { text: "USD / 笔"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "默认 1 USD。预览会列出每笔持仓的新止损价；手续费和隔夜费可能影响实际净利。"
+                        color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap
+                    }
+                    Item { Layout.fillHeight: true; Layout.minimumHeight: 4 }
+                    UiButton {
+                        ui: root.ui; text: "预览一键推保本"; variant: "primary"; Layout.fillWidth: true
+                        enabled: root.value("positions", []).length > 0 && root.validPositiveNumber(beAmountInput.text)
+                        onClicked: root.request("previewBreakEven", {"scope": root.scope, "amountUsd": beAmountInput.text.trim()})
+                    }
+                }
+                UiCard {
+                    objectName: "controlBatchStopsCard"
+                    ui: root.ui
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    padding: 22
+                    spacing: 13
+                    SectionHeading { ui: root.ui; title: "批量设置止盈 / 止损"; subtitle: "为所选范围内的持仓设置统一绝对价。"; Layout.fillWidth: true }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: root.width >= 650 ? 2 : 1
+                        columnSpacing: 12
+                        rowSpacing: 10
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            Text { text: "止损价 · 可选"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                            TextField {
+                                id: stopLossInput
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+                                placeholderText: "留空则保持原值"
+                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                selectByMouse: true
+                                color: root.ui.text; placeholderTextColor: root.ui.muted
+                                font.family: root.ui.fontFamily; font.pixelSize: 14
+                                leftPadding: 10; rightPadding: 10
+                                background: Rectangle { color: root.ui.surfaceAlt; radius: 9; border.color: stopLossInput.activeFocus ? root.ui.accent : root.ui.border }
+                            }
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            Text { text: "止盈价 · 可选"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                            TextField {
+                                id: takeProfitInput
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+                                placeholderText: "留空则保持原值"
+                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                selectByMouse: true
+                                color: root.ui.text; placeholderTextColor: root.ui.muted
+                                font.family: root.ui.fontFamily; font.pixelSize: 14
+                                leftPadding: 10; rightPadding: 10
+                                background: Rectangle { color: root.ui.surfaceAlt; radius: 9; border.color: takeProfitInput.activeFocus ? root.ui.accent : root.ui.border }
+                            }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "至少填写一项，价格须大于 0。统一价格只适用于同一品种；全账户含混合品种时，请切到当前品种范围。"
+                        color: root.ui.warning; font.family: root.ui.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap
+                    }
+                    Item { Layout.fillHeight: true; Layout.minimumHeight: 4 }
+                    UiButton {
+                        ui: root.ui; text: "预览批量设置"; variant: "primary"; Layout.fillWidth: true
+                        enabled: root.value("positions", []).length > 0 && root.validBatchStops()
+                        onClicked: root.request("previewBatchStops", {"scope": root.scope, "sl": stopLossInput.text.trim(), "tp": takeProfitInput.text.trim()})
                     }
                 }
             }

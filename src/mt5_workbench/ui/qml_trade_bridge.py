@@ -22,6 +22,9 @@ from mt5_workbench.services.account_controls import (
     close_request, execute_batch, load_targets,
 )
 from mt5_workbench.services.journal_positions import load_open_positions
+from mt5_workbench.services.position_protection import (
+    execute_protection_batch, prepare_protection,
+)
 from mt5_workbench.services.trade_execution import (
     build_requests, check_requests, existing_duplicates, send_checked,
 )
@@ -350,6 +353,79 @@ class QmlTradingBridge(QmlBridge):
             "confirmText": f"确认{title}", "danger": kind == "close",
         })
 
+    def _preview_protection(self, action: str, payload: dict) -> None:
+        """Show the exact position SL/TP changes before any trading request."""
+        self._clear_confirmation()
+        account = self._require_account()
+        scope = str(payload.get("scope", self._control_scope))
+        if scope not in {"symbol", "account"} or scope != self._control_scope:
+            raise ValueError("操作范围已变化，请刷新目标后重试")
+        rows = load_targets("close", scope, self.symbol_name, api=self._api)
+        if not rows:
+            raise ValueError("所选范围内没有持仓")
+        kind = "breakeven" if action == "previewBreakEven" else "batch"
+        amount_usd = sl = tp = None
+        if kind == "breakeven":
+            amount_usd = money(payload.get("amountUsd", ""), "每笔目标锁盈")
+        else:
+            sl_text = str(payload.get("sl", "")).strip()
+            tp_text = str(payload.get("tp", "")).strip()
+            if not sl_text and not tp_text:
+                raise ValueError("请至少填写止损价或止盈价")
+            sl = money(sl_text, "止损价") if sl_text else None
+            tp = money(tp_text, "止盈价") if tp_text else None
+        plans = prepare_protection(kind, rows, amount_usd=amount_usd,
+                                   sl=sl, tp=tp, api=self._api)
+        if not plans:
+            raise ValueError("所选持仓的保护价已满足目标，无需修改")
+        if not self.check_account_access():
+            raise RuntimeError("账户已切换，预览已取消")
+        token = uuid4().hex
+        skipped = len(rows) - len(plans)
+        self._confirmation = {
+            "kind": "protection", "token": token, "operation": kind,
+            "scope": scope, "rows": rows, "plans": plans,
+            "amount_usd": amount_usd, "sl": sl, "tp": tp,
+            "account": (account.login, account.server),
+        }
+        if kind == "breakeven":
+            columns = ["Ticket", "品种/方向", "开仓价", "原止损", "新止损", "估算锁盈"]
+            display_rows = [
+                [str(plan.ticket), f"{plan.symbol} {plan.side}",
+                 str(plan.price_open), str(plan.old_sl or "—"),
+                 str(plan.new_sl),
+                 (f"{Decimal(str(plan.expected_profit_usc)) / 100:.2f} USD"
+                  if plan.expected_profit_usc is not None else "—")]
+                for plan in plans
+            ]
+            title = "一键推保本"
+            parameter = f"每笔目标锁盈约 {amount_usd} USD"
+            warning = ("估算为持仓毛利润，未扣除手续费、隔夜费及实际执行偏差。"
+                       "现有更优止损会跳过；确认时会重新核对持仓与报价。")
+        else:
+            columns = ["Ticket", "品种/方向", "原止损", "新止损", "原止盈", "新止盈"]
+            display_rows = [
+                [str(plan.ticket), f"{plan.symbol} {plan.side}",
+                 str(plan.old_sl or "—"), str(plan.new_sl or "—"),
+                 str(plan.old_tp or "—"), str(plan.new_tp or "—")]
+                for plan in plans
+            ]
+            title = "批量设置止盈 / 止损"
+            parameter = f"统一止损 {sl if sl is not None else '保持原值'} · 止盈 {tp if tp is not None else '保持原值'}"
+            warning = ("统一价格可能改变现有风险；留空的一侧保持原值。"
+                       "确认时会重新核对持仓与报价。")
+        self._set_state(confirmation={
+            "token": token, "title": f"确认{title}", "heading": "请逐笔核对修改前后的价格",
+            "details": (f"账户 {account.login} · {account.server} · {account.currency}\n"
+                        f"范围 {self.symbol_name if scope == 'symbol' else '整个账户'} · "
+                        f"修改 {len(plans)} 笔" +
+                        (f" · 跳过 {skipped} 笔" if skipped else "") +
+                        f"\n{parameter}"),
+            "warning": warning + "任一笔失败即停止后续操作，不自动重试。",
+            "columns": columns, "rows": display_rows,
+            "confirmText": "确认修改止盈止损", "danger": kind == "batch",
+        })
+
     def _publish_journal(self, payload: dict) -> None:
         account = self._require_account()
         if self.journal_repo is None:
@@ -421,6 +497,23 @@ class QmlTradingBridge(QmlBridge):
             self._set_state(status=f"控制操作完成 {len(done)} 笔；请在 MT5 核对实际状态")
             self._refresh_controls(preview["scope"])
             self.perform("refresh", {})
+        elif preview["kind"] == "protection":
+            try:
+                done = execute_protection_batch(
+                    preview["operation"], preview["scope"], self.symbol_name,
+                    account, preview["rows"], preview["plans"],
+                    _records_dir("controls"), amount_usd=preview["amount_usd"],
+                    sl=preview["sl"], tp=preview["tp"], api=self._api,
+                )
+            except Exception:
+                try:
+                    self._refresh_controls(preview["scope"], force=True)
+                except (RuntimeError, ValueError):
+                    pass
+                raise
+            self._set_state(status=f"止盈止损已修改 {len(done)} 笔；请在 MT5 核对实际状态")
+            self._refresh_controls(preview["scope"], force=True)
+            self.perform("refresh", {})
         elif preview["kind"] == "journal-delete":
             if self.journal_repo is None or not self.journal_repo.delete_post(
                     (account.login, account.server), preview["post_id"]):
@@ -442,6 +535,8 @@ class QmlTradingBridge(QmlBridge):
                 self._refresh_controls(str(payload.get("scope", self._control_scope)), force=True)
             elif action == "controlsPreview":
                 self._preview_control(payload)
+            elif action in {"previewBreakEven", "previewBatchStops"}:
+                self._preview_protection(action, payload)
             elif action == "journalPublish":
                 self._publish_journal(payload)
             elif action == "journalDelete":
@@ -459,7 +554,8 @@ class QmlTradingBridge(QmlBridge):
                 optimizer = dict(self.state.get("optimizer", {}))
                 optimizer["warning"] = str(exc)
                 self._set_state(optimizer=optimizer)
-            elif action in {"controlsRefresh", "controlsPreview"}:
+            elif action in {"controlsRefresh", "controlsPreview",
+                            "previewBreakEven", "previewBatchStops", "confirm"}:
                 controls = dict(self.state.get("controls", {}))
                 controls["status"] = str(exc)
                 self._set_state(controls=controls)

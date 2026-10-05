@@ -106,6 +106,22 @@ class QmlUiTests(unittest.TestCase):
             self.assertAlmostEqual(drawdown.mapToScene(QPointF(0, 0)).y(),
                                    statuses.mapToScene(QPointF(0, 0)).y(), delta=2)
             self.assertAlmostEqual(drawdown.height(), statuses.height(), delta=2)
+            bridge.perform("navigate", {"page": "controls"})
+            for width in (1200, 2560):
+                window.setWidth(width)
+                self.app.processEvents()
+                breakeven = window.findChild(QQuickItem, "controlBreakevenCard")
+                batch_stops = window.findChild(QQuickItem, "controlBatchStopsCard")
+                self.assertIsNotNone(breakeven)
+                self.assertIsNotNone(batch_stops)
+                be_pos = breakeven.mapToScene(QPointF(0, 0))
+                batch_pos = batch_stops.mapToScene(QPointF(0, 0))
+                if width == 1200:
+                    self.assertAlmostEqual(be_pos.x(), batch_pos.x(), delta=2)
+                    self.assertGreater(batch_pos.y(), be_pos.y())
+                else:
+                    self.assertAlmostEqual(be_pos.y(), batch_pos.y(), delta=2)
+                    self.assertGreater(batch_pos.x(), be_pos.x())
             self.assertFalse(window.grabWindow().isNull())
             window.close()
         finally:

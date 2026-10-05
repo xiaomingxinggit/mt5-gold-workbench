@@ -153,6 +153,49 @@ class QmlTradeBridgeTests(unittest.TestCase):
         bridge.perform("cancelConfirm", {})
         self.assertEqual(api.sent, [])
 
+    def test_protection_preview_requires_confirmation_for_minimum_position(self):
+        bridge, api = self.make_bridge()
+        api.active_positions = (SimpleNamespace(
+            ticket=123, symbol="XAUUSDc", type=mt5.POSITION_TYPE_BUY,
+            volume=0.01, price_open=4000.0, sl=0.0, tp=0.0,
+        ),)
+        api.order_calc_profit = lambda kind, _symbol, volume, opened, closed: (
+            (closed - opened) if kind == mt5.ORDER_TYPE_BUY else (opened - closed)
+        ) * volume * 100
+
+        bridge.perform("previewBreakEven", {"scope": "symbol", "amountUsd": "1"})
+        confirmation = bridge.state["confirmation"]
+        self.assertEqual(confirmation["title"], "确认一键推保本")
+        self.assertEqual(confirmation["rows"][0][-2], "4100.00")
+        self.assertEqual(confirmation["rows"][0][-1], "1.00 USD")
+        self.assertEqual(api.sent, [])
+        bridge.perform("cancelConfirm", {})
+        self.assertEqual(api.sent, [])
+
+        bridge.perform("previewBatchStops", {"scope": "symbol", "sl": "4050", "tp": "4250"})
+        token = bridge.state["confirmation"]["token"]
+        self.assertEqual(api.sent, [])
+
+        def update_stops(request):
+            api.sent.append(dict(request))
+            current = api.active_positions[0]
+            api.active_positions = (SimpleNamespace(**{**vars(current),
+                              "sl": request["sl"], "tp": request["tp"]}),)
+            return SimpleNamespace(retcode=mt5.TRADE_RETCODE_DONE,
+                                   order=0, deal=0, comment="done")
+
+        api.order_send = update_stops
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+                module, "_records_dir", return_value=Path(temp)), patch.object(
+                bridge, "_refresh_controls"):
+            bridge.perform("confirm", {"token": token})
+            self.assertEqual(len(api.sent), 1)
+            self.assertEqual(api.sent[0]["action"], mt5.TRADE_ACTION_SLTP)
+            self.assertEqual(api.sent[0]["position"], 123)
+            self.assertNotIn("volume", api.sent[0])
+            bridge.perform("confirm", {"token": token})
+            self.assertEqual(len(api.sent), 1)
+
     def test_control_navigation_keeps_gui_thread_free(self):
         bridge, api = self.make_bridge()
         reading = Event()
