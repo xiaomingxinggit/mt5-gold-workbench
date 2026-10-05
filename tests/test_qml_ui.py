@@ -42,6 +42,16 @@ class QmlUiTests(unittest.TestCase):
                 bridge.perform("navigate", {"page": page})
                 self.app.processEvents()
                 self.assertEqual(window.property("page"), page)
+            bridge.perform("navigate", {"page": "optimizer"})
+            self.app.processEvents()
+            mode_selector = window.findChild(QQuickItem, "entryModeSelector")
+            self.assertIsNotNone(mode_selector)
+            self.assertEqual(mode_selector.property("displayText"),
+                             "加权分配 · 自定义风险比例")
+            self.assertEqual(mode_selector.property("contentItem").property("color").name(),
+                             "#172a40")
+            self.assertEqual(mode_selector.property("background").property("color").name(),
+                             "#edf2f8")
             bridge._set_state(
                 dashboard={**bridge.state["dashboard"],
                            "candles": [{"time": "2026-10-05T00:00:00+00:00",
@@ -54,6 +64,10 @@ class QmlUiTests(unittest.TestCase):
             bridge._set_state(theme="dark")
             self.app.processEvents()
             self.assertEqual(window.property("themeName"), "dark")
+            self.assertEqual(mode_selector.property("contentItem").property("color").name(),
+                             "#f3f7fb")
+            self.assertEqual(mode_selector.property("background").property("color").name(),
+                             "#1d2e45")
             for width, height in ((1200, 800), (1440, 900), (2560, 1440)):
                 window.resize(width, height)
                 bridge.perform("navigate", {"page": "journal"})

@@ -135,12 +135,71 @@ Item {
                         Text { text: "风险分配方式"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                         ComboBox {
                             id: modeSelector
+                            objectName: "entryModeSelector"
                             Layout.fillWidth: true
                             Layout.preferredHeight: 42
                             model: ["加权分配 · 自定义风险比例", "等风险 · 每档承担相同风险", "覆盖区间 · 尽量增大总手数", "单点开仓 · 总手数最大"]
                             currentIndex: Math.max(0, root.modes.indexOf(root.form.mode))
                             onActivated: root.updateField("mode", root.modes[currentIndex])
                             font.family: root.ui.fontFamily; font.pixelSize: 14
+                            background: Rectangle {
+                                radius: 9
+                                color: root.ui.surfaceAlt
+                                border.color: modeSelector.activeFocus ? root.ui.accent : root.ui.border
+                            }
+                            contentItem: Text {
+                                text: modeSelector.displayText
+                                color: root.ui.text
+                                font: modeSelector.font
+                                leftPadding: 12
+                                rightPadding: 34
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
+                            }
+                            indicator: Text {
+                                x: modeSelector.width - width - 14
+                                y: (modeSelector.height - height) / 2
+                                text: "▾"
+                                color: root.ui.muted
+                                font.family: root.ui.fontFamily
+                                font.pixelSize: 16
+                            }
+                            delegate: ItemDelegate {
+                                width: modeSelector.width - 8
+                                height: 40
+                                text: modelData
+                                highlighted: modeSelector.highlightedIndex === index
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: root.ui.text
+                                    font: modeSelector.font
+                                    leftPadding: 10
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                                background: Rectangle {
+                                    radius: 6
+                                    color: parent.highlighted ? root.ui.accentSoft : root.ui.surface
+                                }
+                            }
+                            popup: Popup {
+                                y: modeSelector.height + 4
+                                width: modeSelector.width
+                                padding: 4
+                                implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
+                                contentItem: ListView {
+                                    clip: true
+                                    implicitHeight: contentHeight
+                                    model: modeSelector.popup.visible ? modeSelector.delegateModel : null
+                                    currentIndex: modeSelector.highlightedIndex
+                                    ScrollIndicator.vertical: ScrollIndicator {}
+                                }
+                                background: Rectangle {
+                                    radius: 9
+                                    color: root.ui.surface
+                                    border.color: root.ui.border
+                                }
+                            }
                         }
                         Text { text: "权重 1,2,3 表示三个档位分别承担 1:2:3 的预算。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
