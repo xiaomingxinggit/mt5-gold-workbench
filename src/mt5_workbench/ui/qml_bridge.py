@@ -32,6 +32,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from mt5_workbench.config import DEFAULT_SYMBOL
 from mt5_workbench.domain.account_policy import is_usc_account
+from mt5_workbench.domain.journal import BEIJING_TZ, beijing_time
 from mt5_workbench.infrastructure.journal_db import (
     JournalRepository, MAX_IMAGES, MAX_IMAGE_BYTES,
 )
@@ -148,7 +149,8 @@ def _account_map(account: Any) -> dict[str, Any]:
 
 
 def _empty_state(symbol: str, theme: str) -> dict[str, Any]:
-    current_year = date.today().year
+    today = datetime.now(BEIJING_TZ).date()
+    current_year = today.year
     return {
         "theme": theme,
         "page": "dashboard",
@@ -171,7 +173,9 @@ def _empty_state(symbol: str, theme: str) -> dict[str, Any]:
                     "recent30": 0, "activeDays": 0, "year": current_year,
                     "years": [current_year], "yearTotal": 0, "heatmap": {},
                     "posts": [], "page": 1, "totalPages": 1,
-                    "positions": [], "draftImages": [], "publishedRevision": 0},
+                    "positions": [], "draftImages": [], "publishedRevision": 0,
+                    "replyDraftImages": {}, "replyPublishedRevision": 0,
+                    "replyPublishedPostId": 0, "today": today.isoformat()},
         "optimizer": {},
         "controls": {},
         "monitor": {"loading": False, "status": "waiting", "reason": "等待 MT5 连接",
@@ -264,6 +268,13 @@ def _position_row(row: Any) -> dict[str, Any]:
     }
 
 
+def _journal_timestamp(value: datetime) -> dict[str, str]:
+    local = beijing_time(value)
+    return {"createdAt": local.isoformat(), "dateKey": local.date().isoformat(),
+            "dateLabel": f"{local.year}年{local.month}月{local.day}日",
+            "timeLabel": local.strftime("%H:%M")}
+
+
 def _journal_post(row: Any) -> dict[str, Any]:
     linked = []
     for position in row.positions:
@@ -274,9 +285,14 @@ def _journal_post(row: Any) -> dict[str, Any]:
         linked.append(entry)
     return {
         "id": row.id, "accountLogin": row.account_key[0],
-        "createdAt": _iso(row.created_at), "body": row.body,
+        **_journal_timestamp(row.created_at), "body": row.body,
         "images": [QUrl.fromLocalFile(str(path)).toString() for path in row.images],
         "positions": linked,
+        "replies": [{"id": reply.id, **_journal_timestamp(reply.created_at),
+                     "body": reply.body,
+                     "images": [QUrl.fromLocalFile(str(path)).toString()
+                                for path in reply.images]}
+                    for reply in row.replies],
     }
 
 
@@ -344,6 +360,9 @@ class QmlBridge(QObject):
             if "journal" in changed:
                 retained = {Path(str(row.get("path", ""))) for row in
                             changed["journal"].get("draftImages", [])}
+                retained.update(Path(str(row.get("path", "")))
+                                for draft in changed["journal"].get("replyDraftImages", {}).values()
+                                for row in draft)
                 for path in self._owned_draft_images - retained:
                     try:
                         path.unlink(missing_ok=True)
@@ -636,6 +655,9 @@ class QmlBridge(QObject):
                     current_journal = self._state["journal"]
                     data["draftImages"] = current_journal.get("draftImages", [])
                     data["publishedRevision"] = current_journal.get("publishedRevision", 0)
+                    data["replyDraftImages"] = current_journal.get("replyDraftImages", {})
+                    data["replyPublishedRevision"] = current_journal.get("replyPublishedRevision", 0)
+                    data["replyPublishedPostId"] = current_journal.get("replyPublishedPostId", 0)
                 if kind == "orders":
                     self._set_state(overview=data)
                 elif kind == "books":
@@ -830,7 +852,7 @@ class QmlBridge(QObject):
         self.journal_account_key = account_key
         snapshot = self._state["journal"]
         page = max(1, int(snapshot.get("page", 1)))
-        year = int(snapshot.get("year", date.today().year))
+        year = int(snapshot.get("year", datetime.now(BEIJING_TZ).year))
         draft_images = list(snapshot.get("draftImages", []))
         symbol = self.symbol_name
 
@@ -848,10 +870,10 @@ class QmlBridge(QObject):
             if feed.page > max(1, feed.total_pages):
                 feed = repo.list_posts(account_key, max(1, feed.total_pages), 10)
             trailing = repo.activity(account_key, 365)
-            years = sorted({date.today().year, year, *repo.available_years(account_key)},
+            today = datetime.now(BEIJING_TZ).date()
+            years = sorted({today.year, year, *repo.available_years(account_key)},
                            reverse=True)
             annual = repo.activity_year(account_key, year)
-            today = date.today()
             recent30 = sum(count for day, count in trailing.items()
                            if today - timedelta(days=29) <= day <= today)
             return {
@@ -867,6 +889,10 @@ class QmlBridge(QObject):
                 "positions": [_position_row(position) for position in active],
                 "draftImages": draft_images,
                 "publishedRevision": snapshot.get("publishedRevision", 0),
+                "replyDraftImages": snapshot.get("replyDraftImages", {}),
+                "replyPublishedRevision": snapshot.get("replyPublishedRevision", 0),
+                "replyPublishedPostId": snapshot.get("replyPublishedPostId", 0),
+                "today": today.isoformat(),
             }
 
         self._request_job("journal", (account_key, page, year), load, force=force)
@@ -878,15 +904,71 @@ class QmlBridge(QObject):
         mime = clipboard.mimeData() if clipboard is not None else None
         return bool(mime is not None and mime.hasImage())
 
-    def _paste_journal_image(self) -> None:
-        draft = list(self._state["journal"].get("draftImages", []))
-        if len(draft) >= MAX_IMAGES:
-            self._set_status(f"每篇日志最多附带 {MAX_IMAGES} 张图片")
-            return
+    def _journal_draft_images(self, post_id: int = 0) -> list[dict[str, str]]:
+        journal = self._state["journal"]
+        return list(journal.get("replyDraftImages", {}).get(str(post_id), [])
+                    if post_id else journal.get("draftImages", []))
+
+    def _set_journal_draft_images(self, images: list[dict[str, str]], post_id: int = 0) -> None:
+        journal = dict(self._state["journal"])
+        if post_id:
+            drafts = dict(journal.get("replyDraftImages", {}))
+            if images:
+                drafts[str(post_id)] = images
+            else:
+                drafts.pop(str(post_id), None)
+            journal["replyDraftImages"] = drafts
+        else:
+            journal["draftImages"] = images
+        self._set_state(journal=journal)
+
+    def _check_journal_image_target(self, post_id: int) -> bool:
         if self.journal_repo is None:
             self._set_status(self.journal_error or "本地日志不可用")
-            return
+            return False
         if not self.check_account_access():
+            return False
+        if post_id < 0 or (post_id and not self.journal_repo.has_post(self._identity(), post_id)):
+            self._set_status("帖子不存在或不属于当前账户")
+            return False
+        return True
+
+    def _choose_journal_images(self, post_id: int = 0) -> None:
+        if not self._check_journal_image_target(post_id):
+            return
+        account_key = self._identity()
+        names, _ = QFileDialog.getOpenFileNames(
+            None, "选择回复图片" if post_id else "选择日志图片", "",
+            "图片 (*.png *.jpg *.jpeg *.webp *.gif)")
+        if not self._check_journal_image_target(post_id) or self._identity() != account_key:
+            return
+        draft = self._journal_draft_images(post_id)
+        selected = {image["path"] for image in draft}
+        for name in names:
+            path = Path(name).resolve()
+            if str(path) in selected:
+                continue
+            if len(draft) >= MAX_IMAGES:
+                self._set_status(f"每条回复最多 {MAX_IMAGES} 张图片" if post_id
+                                 else f"每篇日志最多附带 {MAX_IMAGES} 张图片")
+                break
+            try:
+                self.journal_repo._check_image(path)
+            except (OSError, ValueError) as exc:
+                self._set_status(f"无法添加图片：{exc}")
+                continue
+            draft.append({"path": str(path), "name": path.name,
+                          "url": QUrl.fromLocalFile(str(path)).toString()})
+            selected.add(str(path))
+        self._set_journal_draft_images(draft, post_id)
+
+    def _paste_journal_image(self, post_id: int = 0) -> None:
+        if not self._check_journal_image_target(post_id):
+            return
+        draft = self._journal_draft_images(post_id)
+        if len(draft) >= MAX_IMAGES:
+            self._set_status(f"每条回复最多 {MAX_IMAGES} 张图片" if post_id
+                             else f"每篇日志最多附带 {MAX_IMAGES} 张图片")
             return
         account_key = self._identity()
         if account_key is None:
@@ -913,12 +995,12 @@ class QmlBridge(QObject):
             if path.stat().st_size > MAX_IMAGE_BYTES:
                 raise ValueError("单张图片不得超过 8 MiB")
             self.journal_repo._check_image(path)
-            if not self.check_account_access() or self._identity() != account_key:
+            if not self._check_journal_image_target(post_id) or self._identity() != account_key:
                 return
             self._owned_draft_images.add(path)
             draft.append({"path": str(path), "name": "粘贴的图片.png",
                           "url": QUrl.fromLocalFile(str(path)).toString()})
-            self._set_state(journal={**self._state["journal"], "draftImages": draft})
+            self._set_journal_draft_images(draft, post_id)
             self._set_status("已从剪贴板添加图片")
             added = True
         except (OSError, ValueError) as exc:
@@ -1021,35 +1103,24 @@ class QmlBridge(QObject):
             self._set_state(journal=journal)
             self.refresh_journal(force=True)
             return
-        if action == "journalChooseImages":
-            names, _ = QFileDialog.getOpenFileNames(
-                None, "选择日志图片", "", "图片 (*.png *.jpg *.jpeg *.webp *.gif)")
-            if names:
-                draft = list(self._state["journal"].get("draftImages", []))
-                selected = {image["path"] for image in draft}
-                for name in names:
-                    path = Path(name).resolve()
-                    if str(path) in selected:
-                        continue
-                    if len(draft) >= MAX_IMAGES:
-                        self._set_status(f"每篇日志最多附带 {MAX_IMAGES} 张图片")
-                        break
-                    if not path.is_file() or path.stat().st_size > MAX_IMAGE_BYTES:
-                        self._set_status("图片不存在或超过 8 MiB")
-                        continue
-                    draft.append({"path": str(path), "name": path.name,
-                                  "url": QUrl.fromLocalFile(str(path)).toString()})
-                    selected.add(str(path))
-                self._set_state(journal={**self._state["journal"], "draftImages": draft})
-            return
-        if action == "journalPasteImage":
-            self._paste_journal_image()
-            return
-        if action == "journalRemoveImage":
-            target = str(values.get("path", ""))
-            draft = [image for image in self._state["journal"].get("draftImages", [])
-                     if image.get("path") != target]
-            self._set_state(journal={**self._state["journal"], "draftImages": draft})
+        if action in {"journalChooseImages", "journalPasteImage", "journalRemoveImage",
+                      "journalDiscardReply"}:
+            try:
+                post_id = int(values.get("postId", 0))
+                if action == "journalChooseImages":
+                    self._choose_journal_images(post_id)
+                elif action == "journalPasteImage":
+                    self._paste_journal_image(post_id)
+                elif action == "journalDiscardReply":
+                    if post_id > 0:
+                        self._set_journal_draft_images([], post_id)
+                else:
+                    target = str(values.get("path", ""))
+                    draft = [image for image in self._journal_draft_images(post_id)
+                             if image.get("path") != target]
+                    self._set_journal_draft_images(draft, post_id)
+            except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+                self._set_status(f"图片操作未完成：{exc}")
             return
         if action == "monitorTolerance":
             value = _number(values.get("points"))

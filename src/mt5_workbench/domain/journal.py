@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
 
 AccountKey = tuple[int, str]
+BEIJING_TZ = timezone(timedelta(hours=8), "Asia/Shanghai")
+
+
+def beijing_time(value: datetime) -> datetime:
+    """Use Beijing time for journal dates, including legacy naive timestamps."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=BEIJING_TZ)
+    return value.astimezone(BEIJING_TZ)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +46,15 @@ class PositionLink(PositionSnapshot):
 
 
 @dataclass(frozen=True, slots=True)
+class JournalReply:
+    id: int
+    post_id: int
+    body: str
+    created_at: datetime
+    images: tuple[Path, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class JournalPost:
     id: int
     account_key: AccountKey
@@ -45,6 +62,7 @@ class JournalPost:
     created_at: datetime
     images: tuple[Path, ...]
     positions: tuple[PositionLink, ...]
+    replies: tuple[JournalReply, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

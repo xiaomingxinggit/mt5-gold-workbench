@@ -64,7 +64,8 @@ ApplicationWindow {
     Shortcut {
         sequence: "Escape"
         onActivated: {
-            if (root.confirmationToken.length > 0) root.action("cancelConfirm", {})
+            if (journalPage.imagePreviewOpen) journalPage.closeImagePreview()
+            else if (root.confirmationToken.length > 0) root.action("cancelConfirm", {})
             else if (root.fullscreen) root.action("toggleFullscreen", {})
         }
     }
@@ -352,6 +353,7 @@ ApplicationWindow {
                         bridge: root.backend
                     }
                     JournalView {
+                        id: journalPage
                         ui: theme
                         pageData: root.journalData
                         bridge: root.backend

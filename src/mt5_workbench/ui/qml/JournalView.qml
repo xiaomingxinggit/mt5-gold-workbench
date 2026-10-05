@@ -12,7 +12,13 @@ Item {
     property string draftBody: ""
     property var selectedPositionIds: []
     property int lastPublishedRevision: 0
+    property int lastReplyPublishedRevision: 0
     property string lastAccountLabel: ""
+    property var replyBodies: ({})
+    property int replyingTo: 0
+    readonly property bool imagePreviewOpen: imageViewer.visible
+    readonly property string todayKey: String(root.value("today", new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)))
+    readonly property var timelineDays: groupPosts()
     readonly property int calendarWeeks: weeksInYear()
     readonly property real calendarGridWidth: calendarWeeks * cellSize() + (calendarWeeks - 1) * 3
 
@@ -22,6 +28,9 @@ Item {
             root.draftBody = ""
             root.selectedPositionIds = []
             root.composing = false
+            root.replyBodies = ({})
+            root.replyingTo = 0
+            imageViewer.close()
         }
         root.lastAccountLabel = label
         var revision = Number(root.value("publishedRevision", 0))
@@ -31,7 +40,46 @@ Item {
             root.composing = false
         }
         root.lastPublishedRevision = revision
+        var replyRevision = Number(root.value("replyPublishedRevision", 0))
+        if (replyRevision > root.lastReplyPublishedRevision) {
+            var postId = Number(root.value("replyPublishedPostId", 0))
+            root.updateReplyBody(postId, "")
+            if (root.replyingTo === postId) root.replyingTo = 0
+        }
+        root.lastReplyPublishedRevision = replyRevision
     }
+    onVisibleChanged: if (!visible) imageViewer.close()
+
+    function openImages(images, index) { imageViewer.showImages(images, index) }
+    function closeImagePreview() { imageViewer.close() }
+    function replyBody(postId) { return String(root.replyBodies[String(postId)] || "") }
+    function updateReplyBody(postId, body) {
+        if (root.replyBody(postId) === body) return
+        var next = Object.assign({}, root.replyBodies)
+        next[String(postId)] = body
+        root.replyBodies = next
+    }
+    function discardReply(postId) {
+        root.updateReplyBody(postId, "")
+        root.replyingTo = 0
+        root.request("journalDiscardReply", {postId: postId})
+    }
+    function groupPosts() {
+        var groups = []
+        var posts = root.value("posts", [])
+        for (var i = 0; i < posts.length; ++i) {
+            var post = posts[i]
+            var key = String(post.dateKey || "")
+            var group = groups.length ? groups[groups.length - 1] : null
+            if (!group || group.key !== key) {
+                group = {key: key, label: String(post.dateLabel || "日期未知"), posts: []}
+                groups.push(group)
+            }
+            group.posts.push(post)
+        }
+        return groups
+    }
+    function currentYear() { return Number(root.todayKey.slice(0, 4)) }
 
     function value(name, fallback) {
         var result = root.pageData ? root.pageData[name] : undefined
@@ -41,26 +89,26 @@ Item {
         if (root.bridge) root.bridge.perform(action, payload)
     }
     function dayKey(week, weekday) {
-        var year = Number(root.value("year", new Date().getFullYear()))
+        var year = Number(root.value("year", root.currentYear()))
         var first = new Date(year, 0, 1)
         var mondayOffset = (first.getDay() + 6) % 7
         var date = new Date(year, 0, 1 - mondayOffset + week * 7 + weekday)
-        if (date.getFullYear() !== year || date > new Date()) return ""
-        return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0")
+        var key = date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0")
+        return date.getFullYear() !== year || key > root.todayKey ? "" : key
     }
     function dayCount(key) {
         var counts = root.value("heatmap", {})
         return Number(counts[key] || 0)
     }
     function monthWeekIndex(month) {
-        var year = Number(root.value("year", new Date().getFullYear()))
+        var year = Number(root.value("year", root.currentYear()))
         var first = new Date(year, 0, 1)
         var mondayOffset = (first.getDay() + 6) % 7
         var elapsedDays = Math.round((Date.UTC(year, month, 1) - Date.UTC(year, 0, 1)) / 86400000)
         return Math.floor((mondayOffset + elapsedDays) / 7)
     }
     function weeksInYear() {
-        var year = Number(root.value("year", new Date().getFullYear()))
+        var year = Number(root.value("year", root.currentYear()))
         var mondayOffset = (new Date(year, 0, 1).getDay() + 6) % 7
         var days = Math.round((Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 86400000)
         return Math.ceil((mondayOffset + days) / 7)
@@ -160,37 +208,20 @@ Item {
                 }
                 RowLayout {
                     Layout.fillWidth: true
+                    spacing: 12
                     Text { text: "附带图片"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
-                    Item { Layout.fillWidth: true }
                     Text { text: String(root.value("draftImages", []).length) + " / 4"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                     UiButton { ui: root.ui; text: "粘贴图片"; variant: "secondary"; onClicked: root.request("journalPasteImage", {}) }
                     UiButton { ui: root.ui; text: "选择图片"; variant: "secondary"; onClicked: root.request("journalChooseImages", {}) }
+                    Item { Layout.fillWidth: true }
                 }
                 Text { text: "可在编辑框按 Ctrl+V 粘贴截图；也支持 PNG、JPG、WebP、GIF，每张不超过 8 MiB。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
-                Flow {
+                JournalDraftImages {
+                    ui: root.ui
                     Layout.fillWidth: true
-                    width: parent.width
-                    spacing: 8
-                    visible: root.value("draftImages", []).length > 0
-                    Repeater {
-                        model: root.value("draftImages", [])
-                        delegate: Rectangle {
-                            required property var modelData
-                            width: 138; height: 102; radius: 8
-                            color: root.ui.surfaceAlt; border.color: root.ui.border
-                            clip: true
-                            Image { anchors.fill: parent; anchors.margins: 3; source: modelData.url || ""; fillMode: Image.PreserveAspectCrop; asynchronous: true }
-                            Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 24; color: root.ui.surface; opacity: 0.9 }
-                            Text { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 6; text: String(modelData.name || "图片"); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 11; elide: Text.ElideMiddle }
-                            Rectangle {
-                                anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 5
-                                width: 23; height: 23; radius: 11
-                                color: root.ui.surface; border.color: root.ui.border
-                                Text { anchors.centerIn: parent; text: "×"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 16 }
-                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.request("journalRemoveImage", {"path": String(modelData.path)}) }
-                            }
-                        }
-                    }
+                    images: root.value("draftImages", [])
+                    onRemoved: function(image) { root.request("journalRemoveImage", {path: String(image.path)}) }
+                    onImageClicked: function(index) { root.openImages(images.map(function(image) { return image.url }), index) }
                 }
                 Text { text: "关联当前持仓（可多选）"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
                 Text { text: "最多关联 20 笔；平仓后显示最终盈亏。不关联也可以发布。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
@@ -254,9 +285,9 @@ Item {
                             id: yearSelector
                             objectName: "journalYearSelector"
                             Layout.preferredWidth: 112
-                            model: root.value("years", [new Date().getFullYear()])
-                            currentIndex: Math.max(0, root.value("years", [new Date().getFullYear()]).indexOf(Number(root.value("year", new Date().getFullYear()))))
-                            displayText: String(root.value("year", new Date().getFullYear())) + " 年"
+                            model: root.value("years", [root.currentYear()])
+                            currentIndex: Math.max(0, root.value("years", [root.currentYear()]).indexOf(Number(root.value("year", root.currentYear()))))
+                            displayText: String(root.value("year", root.currentYear())) + " 年"
                             onActivated: root.request("journalYear", {"year": Number(model[currentIndex])})
                             font.family: root.ui.fontFamily; font.pixelSize: 13
                         }
@@ -316,7 +347,7 @@ Item {
                                             width: root.cellSize(); height: width; radius: 2
                                             color: key === "" ? "transparent" : count > 0 ? root.ui.accent : root.ui.surfaceAlt
                                             opacity: count === 0 ? 1 : count === 1 ? 0.48 : count <= 3 ? 0.66 : count <= 6 ? 0.82 : 1
-                                            ToolTip.visible: hover.containsMouse && key !== ""
+                                            ToolTip.visible: hover.hovered && key !== ""
                                             ToolTip.text: key + " · " + count + " 篇记录"
                                             HoverHandler { id: hover }
                                         }
@@ -331,7 +362,7 @@ Item {
                             Item { Layout.fillWidth: true }
                             Text { text: "少"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11 }
                             Repeater { model: [0, 0.48, 0.66, 0.82, 1]
-                                delegate: Rectangle { required property var modelData; width: 11; height: 11; radius: 2; color: index === 0 ? root.ui.surfaceAlt : root.ui.accent; opacity: index === 0 ? 1 : modelData } }
+                                delegate: Rectangle { required property var modelData; required property int index; width: 11; height: 11; radius: 2; color: index === 0 ? root.ui.surfaceAlt : root.ui.accent; opacity: index === 0 ? 1 : modelData } }
                             Text { text: "多"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11 }
                         }
                     }
@@ -340,7 +371,9 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
+                spacing: 12
                 Text { text: "最新记录"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 17; font.weight: Font.DemiBold }
+                Text { text: "北京时间 · UTC+8"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                 Item { Layout.fillWidth: true }
                 Text { text: "共 " + String(root.value("total", 0)) + " 篇 · 每页 10 篇"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
             }
@@ -353,50 +386,46 @@ Item {
                 Text { Layout.fillWidth: true; text: "写下第一条行情观察，或等待本地记录加载。"; horizontalAlignment: Text.AlignHCenter; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13 }
             }
             Repeater {
-                model: root.value("posts", [])
-                delegate: UiCard {
+                model: root.timelineDays
+                delegate: Item {
+                    id: timelineDay
                     required property var modelData
-                    ui: root.ui
+                    objectName: "journalTimelineDay"
                     Layout.fillWidth: true
-                    padding: 22
-                    spacing: 13
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Text { text: "账户 " + String(modelData.accountLogin || "—"); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
-                        Text { text: String(modelData.createdAt || "—"); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
-                        Item { Layout.fillWidth: true }
-                        UiButton { ui: root.ui; text: "删除"; variant: "ghost"; onClicked: root.request("journalDelete", {"postId": Number(modelData.id)}) }
-                    }
-                    Text { Layout.fillWidth: true; text: String(modelData.body || ""); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 14; wrapMode: Text.WordWrap }
-                    Flow {
-                        Layout.fillWidth: true
+                    implicitHeight: dayLayout.implicitHeight
+                    Rectangle { x: 7; y: 12; width: 2; height: Math.max(0, parent.height - 12); color: root.ui.border }
+                    ColumnLayout {
+                        id: dayLayout
                         width: parent.width
-                        spacing: 8
-                        visible: !!modelData.images && modelData.images.length > 0
-                        Repeater {
-                            model: modelData.images || []
-                            delegate: Rectangle {
-                                required property var modelData
-                                width: 160; height: 112; radius: 8; color: root.ui.surfaceAlt; clip: true
-                                Image { anchors.fill: parent; source: String(modelData); fillMode: Image.PreserveAspectCrop; asynchronous: true }
-                            }
-                        }
-                    }
-                    Text { visible: !!modelData.positions && modelData.positions.length > 0; text: "关联持仓 · " + (modelData.positions ? modelData.positions.length : 0); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
-                    Repeater {
-                        model: modelData.positions || []
-                        delegate: Rectangle {
-                            required property var modelData
+                        spacing: 12
+                        RowLayout {
                             Layout.fillWidth: true
-                            implicitHeight: 51; radius: 8; color: root.ui.surfaceAlt
-                            RowLayout {
-                                anchors.fill: parent; anchors.leftMargin: 13; anchors.rightMargin: 13
-                                ColumnLayout {
-                                    Layout.fillWidth: true; spacing: 3
-                                    Text { text: "#" + String(modelData.ticket || "—") + " · " + String(modelData.side || "—") + " " + String(modelData.symbol || "—") + " · " + String(modelData.volume || "—") + " lot"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
-                                    Text { text: String(modelData.accountLabel || ""); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11 }
+                            spacing: 12
+                            Item {
+                                Layout.preferredWidth: 16; Layout.preferredHeight: 24
+                                Rectangle { anchors.centerIn: parent; width: 10; height: 10; radius: 5; color: root.ui.accent }
+                            }
+                            Text { text: timelineDay.modelData.label; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 16; font.weight: Font.DemiBold }
+                            Text { text: timelineDay.modelData.posts.length + " 篇"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                            Item { Layout.fillWidth: true }
+                        }
+                        Repeater {
+                            model: timelineDay.modelData.posts
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: 12
+                                Item {
+                                    Layout.preferredWidth: 16
+                                    Layout.fillHeight: true
+                                    Rectangle { x: 4; y: 37; width: 8; height: 8; radius: 4; color: root.ui.surface; border.color: root.ui.accent; border.width: 2 }
                                 }
-                                Text { text: root.positionResult(modelData); color: modelData.status === "closed" && Number(modelData.resultUsd) < 0 ? root.ui.negative : root.ui.positive; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                                JournalPostCard {
+                                    ui: root.ui
+                                    journal: root
+                                    post: modelData
+                                    Layout.fillWidth: true
+                                }
                             }
                         }
                     }
@@ -412,6 +441,8 @@ Item {
             Item { Layout.preferredHeight: 20 }
         }
     }
+
+    JournalImageViewer { id: imageViewer; ui: root.ui }
 
     function cellSize() {
         return Math.max(8, Math.min(24, Math.floor((root.width - 125) / root.calendarWeeks) - 3))

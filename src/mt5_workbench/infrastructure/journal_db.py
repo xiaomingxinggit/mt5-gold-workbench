@@ -15,8 +15,10 @@ from PySide6.QtGui import QImage
 
 from mt5_workbench.domain.journal import (
     AccountKey,
+    BEIJING_TZ,
     JournalPage,
     JournalPost,
+    JournalReply,
     PositionLink,
     PositionSnapshot,
 )
@@ -168,6 +170,27 @@ class JournalRepository:
                     UNIQUE(post_id, ordinal)
                 )
             """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS post_replies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+                    body TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS ix_replies_post
+                    ON post_replies(post_id, id)
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS reply_images (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reply_id INTEGER NOT NULL REFERENCES post_replies(id) ON DELETE CASCADE,
+                    ordinal INTEGER NOT NULL,
+                    filename TEXT NOT NULL UNIQUE,
+                    UNIQUE(reply_id, ordinal)
+                )
+            """)
             existing = db.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='position_links'"
             ).fetchone()
@@ -239,6 +262,25 @@ class JournalRepository:
             raise ValueError("图片无法完整读取或尺寸过大")
         return source, source.suffix.lower()
 
+    @contextmanager
+    def _copied_images(self, sources: Sequence[Path]) -> Iterator[list[str]]:
+        checked = [self._check_image(path) for path in sources]
+        copied: list[str] = []
+        try:
+            for source, suffix in checked:
+                filename = f"{uuid4().hex}{suffix}"
+                destination = self.images_dir / filename
+                with source.open("rb") as inp, destination.open("xb") as out:
+                    copied.append(filename)
+                    shutil.copyfileobj(inp, out)
+                # Validate the copied bytes too: the source may have changed.
+                self._check_image(destination)
+            yield copied
+        except Exception:
+            for filename in copied:
+                (self.images_dir / filename).unlink(missing_ok=True)
+            raise
+
     def create_post(
         self,
         account_key: AccountKey,
@@ -263,23 +305,8 @@ class JournalRepository:
         if any(p.account_key is not None and p.account_key != (login, server)
                for p in positions):
             raise ValueError("关联持仓不属于当前账户")
-        checked = [self._check_image(path) for path in image_sources]
-        copied: list[str] = []
-        try:
-            for source, suffix in checked:
-                filename = f"{uuid4().hex}{suffix}"
-                destination = self.images_dir / filename
-                # 'xb' refuses to overwrite an existing file, including an
-                # improbable UUID collision. Copying is complete before commit.
-                with source.open("rb") as inp, destination.open("xb") as out:
-                    copied.append(filename)
-                    shutil.copyfileobj(inp, out)
-                if destination.stat().st_size > MAX_IMAGE_BYTES:
-                    raise ValueError("单张图片不得超过 8 MiB")
-                # Recheck the copied bytes as the original can change between
-                # the first validation and the copy.
-                self._check_image(destination)
-            now = datetime.now().astimezone().isoformat(timespec="microseconds")
+        with self._copied_images(image_sources) as copied:
+            now = datetime.now(BEIJING_TZ).isoformat(timespec="microseconds")
             with self._connection() as db:
                 cursor = db.execute(
                     "INSERT INTO posts(account_login, account_server, body, created_at) "
@@ -305,10 +332,45 @@ class JournalRepository:
                     ) for p in positions
                 ])
             return post_id
-        except Exception:
-            for filename in copied:
-                (self.images_dir / filename).unlink(missing_ok=True)
-            raise
+
+    def has_post(self, account_key: AccountKey, post_id: int) -> bool:
+        login, server = _validate_account(account_key)
+        with self._connection() as db:
+            return db.execute(
+                "SELECT 1 FROM posts WHERE id=? AND account_login=? AND account_server=?",
+                (int(post_id), login, server),
+            ).fetchone() is not None
+
+    def create_reply(self, account_key: AccountKey, post_id: int, body: str,
+                     image_sources: Sequence[Path] = ()) -> int:
+        login, server = _validate_account(account_key)
+        if not isinstance(body, str):
+            raise ValueError("回复内容必须是文字")
+        body = body.strip()
+        if len(body) > MAX_POST_LENGTH:
+            raise ValueError(f"回复内容最多 {MAX_POST_LENGTH} 字")
+        if not body and not image_sources:
+            raise ValueError("请输入回复或添加图片")
+        if len(image_sources) > MAX_IMAGES:
+            raise ValueError(f"每条回复最多 {MAX_IMAGES} 张图片")
+        if not self.has_post(account_key, post_id):
+            raise ValueError("帖子不存在或不属于当前账户")
+        with self._copied_images(image_sources) as copied:
+            with self._connection() as db:
+                cursor = db.execute("""
+                    INSERT INTO post_replies(post_id, body, created_at)
+                    SELECT id, ?, ? FROM posts
+                    WHERE id=? AND account_login=? AND account_server=?
+                """, (body, datetime.now(BEIJING_TZ).isoformat(timespec="microseconds"),
+                      int(post_id), login, server))
+                if cursor.rowcount != 1:
+                    raise ValueError("帖子不存在或不属于当前账户")
+                reply_id = int(cursor.lastrowid)
+                db.executemany(
+                    "INSERT INTO reply_images(reply_id, ordinal, filename) VALUES (?, ?, ?)",
+                    [(reply_id, i, filename) for i, filename in enumerate(copied)],
+                )
+            return reply_id
 
     def list_posts(
         self,
@@ -336,6 +398,7 @@ class JournalRepository:
             ids = [row["id"] for row in rows]
             images: dict[int, list[Path]] = {post_id: [] for post_id in ids}
             links: dict[int, list[PositionLink]] = {post_id: [] for post_id in ids}
+            replies: dict[int, list[JournalReply]] = {post_id: [] for post_id in ids}
             if ids:
                 placeholders = ",".join("?" for _ in ids)
                 for image in db.execute(
@@ -353,11 +416,30 @@ class JournalRepository:
                     if (link["account_login"], link["account_server"]) == (
                             owner["account_login"], owner["account_server"]):
                         links[link["post_id"]].append(_read_position(link))
+                reply_rows = db.execute(
+                    f"SELECT * FROM post_replies WHERE post_id IN ({placeholders}) ORDER BY id",
+                    ids,
+                ).fetchall()
+                reply_images: dict[int, list[Path]] = {row["id"]: [] for row in reply_rows}
+                for image in db.execute(f"""
+                    SELECT image.reply_id, image.filename FROM reply_images AS image
+                    JOIN post_replies AS reply ON reply.id=image.reply_id
+                    WHERE reply.post_id IN ({placeholders}) ORDER BY image.ordinal
+                """, ids):
+                    reply_images[image["reply_id"]].append(
+                        self.images_dir / Path(image["filename"]).name)
+                for row in reply_rows:
+                    replies[row["post_id"]].append(JournalReply(
+                        id=row["id"], post_id=row["post_id"], body=row["body"],
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        images=tuple(reply_images[row["id"]]),
+                    ))
         posts = tuple(
             JournalPost(
                 id=row["id"], account_key=(row["account_login"], row["account_server"]),
                 body=row["body"], created_at=datetime.fromisoformat(row["created_at"]),
                 images=tuple(images[row["id"]]), positions=tuple(links[row["id"]]),
+                replies=tuple(replies[row["id"]]),
             ) for row in rows
         )
         return JournalPage(posts, total, page, page_size)
@@ -367,7 +449,7 @@ class JournalRepository:
     ) -> dict[date, int]:
         if not isinstance(days, int) or not 1 <= days <= 3660:
             raise ValueError("统计天数必须在 1 到 3660 之间")
-        today = date.today()
+        today = datetime.now(BEIJING_TZ).date()
         start = today - timedelta(days=days - 1)
         counts = {start + timedelta(days=offset): 0 for offset in range(days)}
         if account_key is None:
@@ -375,9 +457,9 @@ class JournalRepository:
         login, server = _validate_account(account_key)
         with self._connection() as db:
             rows = db.execute("""
-                SELECT substr(created_at, 1, 10) AS post_date, COUNT(*) AS count
+                SELECT date(created_at, '+8 hours') AS post_date, COUNT(*) AS count
                 FROM posts WHERE account_login=? AND account_server=?
-                  AND substr(created_at, 1, 10) >= ?
+                  AND date(created_at, '+8 hours') >= ?
                 GROUP BY post_date
             """, (login, server, start.isoformat())).fetchall()
         for row in rows:
@@ -393,7 +475,7 @@ class JournalRepository:
         login, server = _validate_account(account_key)
         with self._connection() as db:
             rows = db.execute("""
-                SELECT DISTINCT substr(created_at, 1, 4) AS post_year
+                SELECT DISTINCT strftime('%Y', created_at, '+8 hours') AS post_year
                 FROM posts
                 WHERE account_login=? AND account_server=?
                 ORDER BY post_year DESC
@@ -415,10 +497,10 @@ class JournalRepository:
         login, server = _validate_account(account_key)
         with self._connection() as db:
             rows = db.execute("""
-                SELECT substr(created_at, 1, 10) AS post_date, COUNT(*) AS count
+                SELECT date(created_at, '+8 hours') AS post_date, COUNT(*) AS count
                 FROM posts
                 WHERE account_login=? AND account_server=?
-                  AND substr(created_at, 1, 10) BETWEEN ? AND ?
+                  AND date(created_at, '+8 hours') BETWEEN ? AND ?
                 GROUP BY post_date
             """, (login, server, start.isoformat(), end.isoformat())).fetchall()
         for row in rows:
@@ -502,7 +584,12 @@ class JournalRepository:
                 SELECT filename FROM post_images WHERE post_id=? AND post_id IN (
                     SELECT id FROM posts WHERE account_login=? AND account_server=?
                 )
-            """, (int(post_id), login, server)).fetchall()
+                UNION ALL
+                SELECT image.filename FROM reply_images AS image
+                JOIN post_replies AS reply ON reply.id=image.reply_id
+                JOIN posts AS post ON post.id=reply.post_id
+                WHERE post.id=? AND post.account_login=? AND post.account_server=?
+            """, (int(post_id), login, server, int(post_id), login, server)).fetchall()
             cursor = db.execute("""
                 DELETE FROM posts WHERE id=? AND account_login=? AND account_server=?
             """, (int(post_id), login, server))

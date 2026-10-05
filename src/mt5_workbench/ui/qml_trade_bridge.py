@@ -28,7 +28,7 @@ from mt5_workbench.services.position_protection import (
 from mt5_workbench.services.trade_execution import (
     build_requests, check_requests, existing_duplicates, send_checked,
 )
-from mt5_workbench.ui.qml_bridge import QmlBridge
+from mt5_workbench.ui.qml_bridge import QmlBridge, _journal_post
 
 
 def _records_dir(kind: str) -> Path:
@@ -466,9 +466,41 @@ class QmlTradingBridge(QmlBridge):
         self._set_state(confirmation={
             "token": token, "title": "删除行情日志", "heading": "删除这篇帖子？",
             "details": f"账户 {account.login} · {account.server} · 帖子 {post_id}",
-            "warning": "帖子及其本地图片会被删除，无法撤销。",
+            "warning": "帖子、回复及其本地图片会被删除，无法撤销。",
             "columns": [], "rows": [], "confirmText": "确认删除", "danger": True,
         })
+
+    def _publish_reply(self, payload: dict) -> None:
+        account = self._require_account()
+        if self.journal_repo is None:
+            raise RuntimeError("本地日志不可用")
+        post_id = int(payload.get("postId", 0))
+        if post_id <= 0:
+            raise ValueError("帖子编号无效")
+        images = self._journal_draft_images(post_id)
+        account_key = (account.login, account.server)
+        if not self.check_account_access():
+            raise RuntimeError("账户已切换，回复已取消")
+        self.journal_repo.create_reply(
+            account_key, post_id, str(payload.get("body", "")),
+            tuple(Path(row["path"]) for row in images),
+        )
+        journal = dict(self.state["journal"])
+        drafts = dict(journal.get("replyDraftImages", {}))
+        drafts.pop(str(post_id), None)
+        journal["replyDraftImages"] = drafts
+        journal["replyPublishedRevision"] = journal.get("replyPublishedRevision", 0) + 1
+        journal["replyPublishedPostId"] = post_id
+        # Invalidate a pre-publication read so it cannot replace these replies.
+        self._generations["journal"] = self._generations.get("journal", 0) + 1
+        self._set_state(journal=journal, status="回复已保存到本机")
+        try:
+            feed = self.journal_repo.list_posts(account_key, journal.get("page", 1), 10)
+            self._set_state(journal={**self.state["journal"],
+                                     "posts": [_journal_post(post) for post in feed.posts]})
+        except (OSError, sqlite3.Error) as exc:
+            self._set_status(f"回复已保存，列表刷新失败：{exc}")
+        self.refresh_journal(force=True)
 
     def _confirm(self, payload: dict) -> None:
         preview = self._confirmation
@@ -519,6 +551,7 @@ class QmlTradingBridge(QmlBridge):
                     (account.login, account.server), preview["post_id"]):
                 raise RuntimeError("帖子不存在或不属于当前账户")
             self._set_state(status="本地帖子已删除")
+            self._set_journal_draft_images([], preview["post_id"])
             self.perform("journalRefresh", {})
 
     def _perform_protected(self, action: str, payload: dict) -> None:
@@ -541,6 +574,8 @@ class QmlTradingBridge(QmlBridge):
                 self._publish_journal(payload)
             elif action == "journalDelete":
                 self._preview_delete_post(payload)
+            elif action == "journalReplyPublish":
+                self._publish_reply(payload)
             elif action == "confirm":
                 self._confirm(payload)
             elif action == "cancelConfirm":

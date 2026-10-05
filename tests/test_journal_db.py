@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from dataclasses import replace
 from contextlib import closing
@@ -6,10 +6,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import sqlite3
 import unittest
+from unittest.mock import patch
 
 from PySide6.QtGui import QImage
 
-from mt5_workbench.domain.journal import PositionSnapshot
+from mt5_workbench.domain.journal import BEIJING_TZ, PositionSnapshot
 from mt5_workbench.infrastructure.journal_db import JournalRepository
 
 
@@ -102,7 +103,7 @@ class JournalRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.list_posts(ACCOUNT_B).posts[0].id, other)
         self.assertEqual(self.repo.list_posts(None).posts, ())
         self.assertFalse(self.repo.delete_post(ACCOUNT_A, other))
-        self.assertEqual(self.repo.activity(ACCOUNT_A, days=7)[date.today()], 12)
+        self.assertEqual(self.repo.activity(ACCOUNT_A, days=7)[datetime.now(BEIJING_TZ).date()], 12)
         self.assertEqual(sum(self.repo.activity(None, days=7).values()), 0)
 
     def test_calendar_year_activity_and_available_years_are_account_scoped(self):
@@ -142,6 +143,63 @@ class JournalRepositoryTests(unittest.TestCase):
         for year in (True, 0, 10000, "2024"):
             with self.subTest(year=year), self.assertRaises(ValueError):
                 self.repo.activity_year(ACCOUNT_A, year)
+
+    def test_calendar_uses_beijing_day_across_utc_midnight_and_new_year(self):
+        before = self.repo.create_post(ACCOUNT_A, "before midnight")
+        after = self.repo.create_post(ACCOUNT_A, "after midnight")
+        with closing(sqlite3.connect(self.repo.db_path)) as db, db:
+            db.executemany("UPDATE posts SET created_at=? WHERE id=?", [
+                ("2025-12-31T15:59:59.999999+00:00", before),
+                ("2025-12-31T16:00:00+00:00", after),
+            ])
+        self.assertEqual(self.repo.available_years(ACCOUNT_A), (2026, 2025))
+        self.assertEqual(self.repo.activity_year(ACCOUNT_A, 2025)[date(2025, 12, 31)], 1)
+        self.assertEqual(self.repo.activity_year(ACCOUNT_A, 2026)[date(2026, 1, 1)], 1)
+        self.assertEqual(sum(self.repo.activity_year(ACCOUNT_A, 2026).values()), 1)
+
+    def test_replies_and_images_persist_under_parent_account_and_delete_with_post(self):
+        image = self.root / "reply.png"
+        self.assertTrue(QImage(2, 2, QImage.Format.Format_RGB32).save(str(image)))
+        post_id = self.repo.create_post(ACCOUNT_A, "post", [image])
+        first = self.repo.create_reply(ACCOUNT_A, post_id, "  follow up  ", [image])
+        second = self.repo.create_reply(ACCOUNT_A, post_id, "", [image])
+        reopened = JournalRepository(self.repo.base_dir)
+        post = reopened.list_posts(ACCOUNT_A).posts[0]
+        self.assertEqual([r.id for r in post.replies], [first, second])
+        self.assertEqual([r.body for r in post.replies], ["follow up", ""])
+        self.assertEqual(post.created_at.utcoffset(), timedelta(hours=8))
+        self.assertEqual(post.replies[0].created_at.utcoffset(), timedelta(hours=8))
+        saved = [*post.images, *(r.images[0] for r in post.replies)]
+        self.assertTrue(all(path.is_file() for path in saved))
+        self.assertEqual(reopened.list_posts(ACCOUNT_B).posts, ())
+        self.assertFalse(reopened.delete_post(ACCOUNT_B, post_id))
+        self.assertTrue(all(path.is_file() for path in saved))
+        self.assertTrue(reopened.delete_post(ACCOUNT_A, post_id))
+        self.assertTrue(all(not path.exists() for path in saved))
+        with closing(sqlite3.connect(self.repo.db_path)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM post_replies").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM reply_images").fetchone()[0], 0)
+
+    def test_invalid_or_other_account_reply_keeps_database_and_image_store_unchanged(self):
+        post_id = self.repo.create_post(ACCOUNT_A, "post")
+        image = self.root / "reply.png"
+        self.assertTrue(QImage(2, 2, QImage.Format.Format_RGB32).save(str(image)))
+        for key, target, body, images in (
+            (ACCOUNT_B, post_id, "wrong login", [image]),
+            (ACCOUNT_C, post_id, "wrong server", [image]),
+            (ACCOUNT_A, post_id + 1, "missing post", [image]),
+            (ACCOUNT_A, post_id, "", []),
+            (ACCOUNT_A, post_id, "x" * 2101, [image]),
+            (ACCOUNT_A, post_id, "too many images", [image] * 5),
+        ):
+            with self.subTest(key=key, target=target, body=body[:20]), self.assertRaises(ValueError):
+                self.repo.create_reply(key, target, body, images)
+        self.assertEqual(self.repo.list_posts(ACCOUNT_A).posts[0].replies, ())
+        self.assertEqual(list(self.repo.images_dir.iterdir()), [])
+        # A parent can disappear after the initial check and image copying.
+        with patch.object(self.repo, "has_post", return_value=True), self.assertRaises(ValueError):
+            self.repo.create_reply(ACCOUNT_A, post_id + 1, "parent removed", [image])
+        self.assertEqual(list(self.repo.images_dir.iterdir()), [])
 
     def test_data_survives_reopening_database(self):
         post_id = self.repo.create_post(ACCOUNT_A, "persistent", positions=[snapshot(33)])
