@@ -132,6 +132,7 @@ Item {
                 SectionHeading { ui: root.ui; title: "写一条行情日志"; subtitle: "仅保存到此设备，并关联当前账户。"; Layout.fillWidth: true }
                 TextArea {
                     id: bodyEditor
+                    objectName: "journalBodyEditor"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 120
                     text: root.draftBody
@@ -142,6 +143,13 @@ Item {
                     font.family: root.ui.fontFamily; font.pixelSize: 14
                     leftPadding: 13; rightPadding: 13; topPadding: 11; bottomPadding: 11
                     onTextChanged: root.draftBody = text
+                    Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_V && (event.modifiers & Qt.ControlModifier)
+                                && root.bridge && root.bridge.hasJournalImageOnClipboard()) {
+                            root.request("journalPasteImage", {})
+                            event.accepted = true
+                        }
+                    }
                     background: Rectangle { color: root.ui.surfaceAlt; radius: 9; border.color: bodyEditor.activeFocus ? root.ui.accent : root.ui.border }
                 }
                 RowLayout {
@@ -155,9 +163,10 @@ Item {
                     Text { text: "附带图片"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
                     Item { Layout.fillWidth: true }
                     Text { text: String(root.value("draftImages", []).length) + " / 4"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                    UiButton { ui: root.ui; text: "粘贴图片"; variant: "secondary"; onClicked: root.request("journalPasteImage", {}) }
                     UiButton { ui: root.ui; text: "选择图片"; variant: "secondary"; onClicked: root.request("journalChooseImages", {}) }
                 }
-                Text { text: "支持 PNG、JPG、WebP、GIF；每张不超过 8 MiB。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                Text { text: "可在编辑框按 Ctrl+V 粘贴截图；也支持 PNG、JPG、WebP、GIF，每张不超过 8 MiB。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                 Flow {
                     Layout.fillWidth: true
                     width: parent.width
@@ -215,102 +224,117 @@ Item {
                 columns: root.width >= 900 ? 3 : 1
                 columnSpacing: 12
                 rowSpacing: 12
-                MetricCard { ui: root.ui; Layout.fillWidth: true; title: "累计日志"; value: String(root.value("total", 0)); note: "当前账户的全部记录" }
+                MetricCard { objectName: "journalFirstMetricCard"; ui: root.ui; Layout.fillWidth: true; title: "累计日志"; value: String(root.value("total", 0)); note: "当前账户的全部记录" }
                 MetricCard { ui: root.ui; Layout.fillWidth: true; title: "过去 30 天"; value: String(root.value("recent30", 0)); note: "最近的市场观察" }
-                MetricCard { ui: root.ui; Layout.fillWidth: true; title: "活跃天数"; value: String(root.value("activeDays", 0)); note: "过去 365 天" }
+                MetricCard { objectName: "journalLastMetricCard"; ui: root.ui; Layout.fillWidth: true; title: "活跃天数"; value: String(root.value("activeDays", 0)); note: "过去 365 天" }
             }
 
             UiCard {
                 objectName: "journalHeatmapCard"
                 ui: root.ui
                 Layout.fillWidth: true
-                Layout.maximumWidth: 1080
-                Layout.alignment: Qt.AlignHCenter
                 padding: 22
-                spacing: 12
+                spacing: 18
                 RowLayout {
+                    objectName: "journalHeatmapHeader"
                     Layout.fillWidth: true
+                    Layout.preferredWidth: parent.width
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 4
-                        Text { text: "记录轨迹"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 17; font.weight: Font.DemiBold }
+                        Text { objectName: "journalHeatmapTitle"; text: "记录轨迹"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 17; font.weight: Font.DemiBold }
                         Text { text: "每个方块代表一天；悬停可查看当日记录数。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                     }
-                    Text { text: String(root.value("year", new Date().getFullYear())) + " 年 " + String(root.value("yearTotal", 0)) + " 篇"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
-                    ComboBox {
-                        id: yearSelector
-                        Layout.preferredWidth: 112
-                        model: root.value("years", [new Date().getFullYear()])
-                        currentIndex: Math.max(0, root.value("years", [new Date().getFullYear()]).indexOf(Number(root.value("year", new Date().getFullYear()))))
-                        displayText: String(root.value("year", new Date().getFullYear())) + " 年"
-                        onActivated: root.request("journalYear", {"year": Number(model[currentIndex])})
-                        font.family: root.ui.fontFamily; font.pixelSize: 13
-                    }
-                }
-                Item {
-                    objectName: "journalHeatmapMonths"
-                    Layout.leftMargin: 20
-                    Layout.preferredWidth: root.calendarGridWidth
-                    Layout.preferredHeight: 16
-                    Repeater {
-                        model: 12
-                        delegate: Text {
-                            required property int index
-                            x: root.monthWeekIndex(index) * (root.cellSize() + 3)
-                            text: String(index + 1) + "月"
-                            color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11
+                    RowLayout {
+                        Layout.alignment: Qt.AlignRight
+                        spacing: 12
+                        Text { text: String(root.value("yearTotal", 0)) + " 篇"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                        Text { text: "年份"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                        ComboBox {
+                            id: yearSelector
+                            objectName: "journalYearSelector"
+                            Layout.preferredWidth: 112
+                            model: root.value("years", [new Date().getFullYear()])
+                            currentIndex: Math.max(0, root.value("years", [new Date().getFullYear()]).indexOf(Number(root.value("year", new Date().getFullYear()))))
+                            displayText: String(root.value("year", new Date().getFullYear())) + " 年"
+                            onActivated: root.request("journalYear", {"year": Number(model[currentIndex])})
+                            font.family: root.ui.fontFamily; font.pixelSize: 13
                         }
                     }
                 }
-                RowLayout {
+                Item {
                     Layout.fillWidth: true
-                    spacing: 8
-                    Column {
-                        spacing: 3
-                        Text { text: "一"; height: root.cellSize(); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 10 }
-                        Text { text: ""; height: root.cellSize() }
-                        Text { text: "三"; height: root.cellSize(); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 10 }
-                        Text { text: ""; height: root.cellSize() }
-                        Text { text: "五"; height: root.cellSize(); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 10 }
-                    }
-                    Row {
-                        id: heatmapRow
-                        objectName: "journalHeatmapGrid"
+                    Layout.preferredHeight: heatmapContent.implicitHeight
+                    ColumnLayout {
+                        id: heatmapContent
+                        width: root.calendarGridWidth + 20
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 12
+                    Item {
+                        objectName: "journalHeatmapMonths"
+                        Layout.leftMargin: 20
                         Layout.preferredWidth: root.calendarGridWidth
-                        spacing: 3
+                        Layout.preferredHeight: 16
                         Repeater {
-                            model: root.calendarWeeks
-                            delegate: Column {
+                            model: 12
+                            delegate: Text {
                                 required property int index
-                                property int week: index
-                                spacing: 3
-                                Repeater {
-                                    model: 7
-                                    delegate: Rectangle {
-                                        required property int index
-                                        property string key: root.dayKey(parent.week, index)
-                                        property int count: root.dayCount(key)
-                                        width: root.cellSize(); height: width; radius: 2
-                                        color: key === "" ? "transparent" : count > 0 ? root.ui.accent : root.ui.surfaceAlt
-                                        opacity: count === 0 ? 1 : count === 1 ? 0.48 : count <= 3 ? 0.66 : count <= 6 ? 0.82 : 1
-                                        ToolTip.visible: hover.containsMouse && key !== ""
-                                        ToolTip.text: key + " · " + count + " 篇记录"
-                                        HoverHandler { id: hover }
+                                x: root.monthWeekIndex(index) * (root.cellSize() + 3)
+                                text: String(index + 1) + "月"
+                                color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Layout.preferredWidth: root.calendarGridWidth + 20
+                        spacing: 8
+                        Column {
+                            spacing: 3
+                            Text { text: "一"; height: root.cellSize(); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 10 }
+                            Text { text: ""; height: root.cellSize() }
+                            Text { text: "三"; height: root.cellSize(); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 10 }
+                            Text { text: ""; height: root.cellSize() }
+                            Text { text: "五"; height: root.cellSize(); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 10 }
+                        }
+                        Row {
+                            id: heatmapRow
+                            objectName: "journalHeatmapGrid"
+                            Layout.preferredWidth: root.calendarGridWidth
+                            spacing: 3
+                            Repeater {
+                                model: root.calendarWeeks
+                                delegate: Column {
+                                    required property int index
+                                    property int week: index
+                                    spacing: 3
+                                    Repeater {
+                                        model: 7
+                                        delegate: Rectangle {
+                                            required property int index
+                                            property string key: root.dayKey(parent.week, index)
+                                            property int count: root.dayCount(key)
+                                            width: root.cellSize(); height: width; radius: 2
+                                            color: key === "" ? "transparent" : count > 0 ? root.ui.accent : root.ui.surfaceAlt
+                                            opacity: count === 0 ? 1 : count === 1 ? 0.48 : count <= 3 ? 0.66 : count <= 6 ? 0.82 : 1
+                                            ToolTip.visible: hover.containsMouse && key !== ""
+                                            ToolTip.text: key + " · " + count + " 篇记录"
+                                            HoverHandler { id: hover }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                    Item { Layout.fillWidth: true }
-                }
-                RowLayout {
-                    Layout.leftMargin: 20
-                    Layout.preferredWidth: root.calendarGridWidth
-                    Item { Layout.fillWidth: true }
-                    Text { text: "少"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11 }
-                    Repeater { model: [0, 0.48, 0.66, 0.82, 1]
-                        delegate: Rectangle { required property var modelData; width: 11; height: 11; radius: 2; color: index === 0 ? root.ui.surfaceAlt : root.ui.accent; opacity: index === 0 ? 1 : modelData } }
-                    Text { text: "多"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11 }
+                        RowLayout {
+                            Layout.leftMargin: 20
+                            Layout.preferredWidth: root.calendarGridWidth
+                            Item { Layout.fillWidth: true }
+                            Text { text: "少"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11 }
+                            Repeater { model: [0, 0.48, 0.66, 0.82, 1]
+                                delegate: Rectangle { required property var modelData; width: 11; height: 11; radius: 2; color: index === 0 ? root.ui.surfaceAlt : root.ui.accent; opacity: index === 0 ? 1 : modelData } }
+                            Text { text: "多"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11 }
+                        }
+                    }
                 }
             }
 
@@ -390,6 +414,6 @@ Item {
     }
 
     function cellSize() {
-        return Math.max(8, Math.min(15, Math.floor((root.width - 125) / root.calendarWeeks) - 3))
+        return Math.max(8, Math.min(24, Math.floor((root.width - 125) / root.calendarWeeks) - 3))
     }
 }

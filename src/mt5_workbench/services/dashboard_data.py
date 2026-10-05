@@ -171,7 +171,8 @@ def fetch_daily_realized(*, api: Any = mt5, now: datetime | None = None,
 
 def load_dashboard(symbol: str, account: Any, tick: Any, *, api: Any = mt5,
                    now: datetime | None = None,
-                   display_tz: tzinfo | None = None) -> DashboardData:
+                   display_tz: tzinfo | None = None,
+                   include_books: bool = True) -> DashboardData:
     """Build a partial snapshot when one read-only MT5 source is unavailable."""
     current = _aware_now(now)
     errors: list[str] = []
@@ -198,13 +199,15 @@ def load_dashboard(symbol: str, account: Any, tick: Any, *, api: Any = mt5,
     except RuntimeError as exc:
         errors.append(str(exc))
 
-    counts: list[int | None] = []
-    for label, getter, kwargs in (("持仓", api.positions_get, {"symbol": symbol}),
-                                  ("挂单", api.orders_get, {"symbol": symbol})):
-        rows = getter(**kwargs)
-        counts.append(len(rows) if rows is not None else None)
-        if rows is None:
-            errors.append(f"{label}读取失败：{_error(api)}")
+    counts: list[int | None] = [None, None]
+    if include_books:
+        for index, (label, getter, kwargs) in enumerate(
+                (("持仓", api.positions_get, {"symbol": symbol}),
+                 ("挂单", api.orders_get, {"symbol": symbol}))):
+            rows = getter(**kwargs)
+            counts[index] = len(rows) if rows is not None else None
+            if rows is None:
+                errors.append(f"{label}读取失败：{_error(api)}")
 
     bid, ask = _finite_number(_field(tick, "bid")), _finite_number(_field(tick, "ask"))
     point = _finite_number(_field(api.symbol_info(symbol), "point"))

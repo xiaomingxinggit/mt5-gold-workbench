@@ -24,6 +24,7 @@ ApplicationWindow {
     property var controlsData: ({})
     property var monitorData: ({})
     property var confirmation: ({})
+    property var refreshIntervals: ({quote: 1, positions: 5, orders: 30})
     property string themeName: "light"
     property string statusText: "就绪"
     property bool fullscreen: false
@@ -42,6 +43,7 @@ ApplicationWindow {
         else if (name === "controls") controlsData = value || ({});
         else if (name === "monitor") monitorData = value || ({});
         else if (name === "confirmation") confirmation = value || ({});
+        else if (name === "refreshIntervals") refreshIntervals = value || ({quote: 1, positions: 5, orders: 30});
         else if (name === "theme") themeName = String(value);
         else if (name === "status") statusText = String(value);
         else if (name === "page") page = String(value);
@@ -434,11 +436,152 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                 }
-                Text {
-                    text: "报价 1 秒  ·  持仓 5 秒  ·  订单 30 秒"
-                    color: theme.faint
+                RowLayout {
+                    spacing: 5
+                    Repeater {
+                        model: [
+                            {kind: "quote", label: "报价"},
+                            {kind: "positions", label: "持仓"},
+                            {kind: "orders", label: "订单"}
+                        ]
+                        delegate: Rectangle {
+                            id: refreshChip
+                            required property var modelData
+                            objectName: "refreshChip_" + modelData.kind
+                            Layout.preferredWidth: refreshLabel.implicitWidth + 16
+                            Layout.preferredHeight: 25
+                            radius: 6
+                            color: refreshMouse.containsMouse ? theme.hover : "transparent"
+                            Text {
+                                id: refreshLabel
+                                anchors.centerIn: parent
+                                text: refreshChip.modelData.label + " "
+                                      + (root.refreshIntervals[refreshChip.modelData.kind] || 1) + " 秒"
+                                color: refreshMouse.containsMouse ? theme.accent : theme.faint
+                                font.family: theme.fontFamily
+                                font.pixelSize: 11
+                            }
+                            MouseArea {
+                                id: refreshMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: refreshEditor.openFor(refreshChip.modelData.kind,
+                                                                 refreshChip.modelData.label)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: refreshEditor
+        objectName: "refreshIntervalDialog"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: 400
+        height: 238
+        modal: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        padding: 22
+        property string kind: ""
+        property string label: ""
+
+        function openFor(selectedKind, selectedLabel) {
+            kind = selectedKind;
+            label = selectedLabel;
+            refreshSeconds.text = String(root.refreshIntervals[selectedKind] || 1);
+            refreshError.visible = false;
+            open();
+        }
+        function apply() {
+            const seconds = Number(refreshSeconds.text);
+            if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) {
+                refreshError.visible = true;
+                return;
+            }
+            refreshError.visible = false;
+            root.action("setRefreshInterval", {kind: kind, seconds: seconds});
+            close();
+        }
+        onOpened: refreshSeconds.forceActiveFocus()
+        background: Rectangle {
+            color: theme.surface
+            radius: 14
+            border.width: 1
+            border.color: theme.border
+        }
+        contentItem: ColumnLayout {
+            spacing: 10
+            Text {
+                text: "设置" + refreshEditor.label + "刷新间隔"
+                color: theme.text
+                font.family: theme.fontFamily
+                font.pixelSize: 18
+                font.weight: Font.DemiBold
+            }
+            Text {
+                text: "点击底栏的时间可分别调整；账户安全检查仍每秒执行。"
+                color: theme.muted
+                font.family: theme.fontFamily
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            RowLayout {
+                spacing: 10
+                TextField {
+                    id: refreshSeconds
+                    objectName: "refreshIntervalSeconds"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 42
+                    color: theme.text
                     font.family: theme.fontFamily
-                    font.pixelSize: 11
+                    font.pixelSize: 15
+                    selectByMouse: true
+                    horizontalAlignment: TextInput.AlignRight
+                    validator: IntValidator { bottom: 1; top: 3600 }
+                    onAccepted: refreshEditor.apply()
+                    background: Rectangle {
+                        color: theme.surfaceAlt
+                        radius: 8
+                        border.width: refreshSeconds.activeFocus ? 2 : 1
+                        border.color: refreshSeconds.activeFocus ? theme.accent : theme.border
+                    }
+                }
+                Text {
+                    text: "秒"
+                    color: theme.muted
+                    font.family: theme.fontFamily
+                    font.pixelSize: 13
+                }
+            }
+            Text {
+                id: refreshError
+                text: "请输入 1–3600 之间的整数。"
+                visible: false
+                color: theme.negative
+                font.family: theme.fontFamily
+                font.pixelSize: 12
+            }
+            Item { Layout.fillHeight: true }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                Item { Layout.fillWidth: true }
+                UiButton {
+                    ui: theme
+                    text: "取消"
+                    variant: "secondary"
+                    onClicked: refreshEditor.close()
+                }
+                UiButton {
+                    ui: theme
+                    text: "保存"
+                    variant: "primary"
+                    onClicked: refreshEditor.apply()
                 }
             }
         }

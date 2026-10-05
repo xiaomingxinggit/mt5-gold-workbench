@@ -97,6 +97,15 @@ class DashboardDataTests(unittest.TestCase):
         self.assertFalse(any(name in ("order_send", "order_check")
                              for name, *_ in self.api.calls))
 
+    def test_chart_refresh_can_skip_independently_scheduled_books(self):
+        snapshot = load_dashboard("XAUUSDc", self.account, self.tick,
+                                  api=self.api, now=NOW, display_tz=CHINA,
+                                  include_books=False)
+        self.assertIsNone(snapshot.positions_count)
+        self.assertIsNone(snapshot.orders_count)
+        self.assertFalse(any(name in ("positions_get", "orders_get")
+                             for name, *_ in self.api.calls))
+
     def test_realized_pnl_uses_local_day_and_excludes_deposits(self):
         self.api.deals = [
             deal(datetime(2026, 9, 30, 15, 30, tzinfo=timezone.utc), 0,

@@ -63,15 +63,35 @@ class QmlUiTests(unittest.TestCase):
                 calendar = window.findChild(QQuickItem, "journalHeatmapCard")
                 months = window.findChild(QQuickItem, "journalHeatmapMonths")
                 grid = window.findChild(QQuickItem, "journalHeatmapGrid")
+                first_metric = window.findChild(QQuickItem, "journalFirstMetricCard")
+                last_metric = window.findChild(QQuickItem, "journalLastMetricCard")
+                year_selector = window.findChild(QQuickItem, "journalYearSelector")
+                title = window.findChild(QQuickItem, "journalHeatmapTitle")
                 self.assertIsNotNone(calendar)
                 self.assertIsNotNone(months)
                 self.assertIsNotNone(grid)
-                self.assertLessEqual(calendar.width(), 1081)
+                self.assertIsNotNone(first_metric)
+                self.assertIsNotNone(last_metric)
+                self.assertIsNotNone(year_selector)
+                self.assertIsNotNone(title)
+                card_left = calendar.mapToScene(QPointF(0, 0)).x()
+                card_right = card_left + calendar.width()
+                grid_left = grid.mapToScene(QPointF(0, 0)).x()
+                grid_right = grid_left + grid.width()
+                self.assertAlmostEqual(card_left,
+                                       first_metric.mapToScene(QPointF(0, 0)).x(), delta=2)
+                self.assertAlmostEqual(card_right,
+                                       last_metric.mapToScene(QPointF(0, 0)).x() + last_metric.width(), delta=2)
                 self.assertAlmostEqual(months.width(), grid.width(), delta=2)
                 self.assertAlmostEqual(months.mapToScene(QPointF(0, 0)).x(),
                                        grid.mapToScene(QPointF(0, 0)).x(), delta=3)
-                self.assertLessEqual(grid.mapToScene(QPointF(0, 0)).x() + grid.width(),
-                                     calendar.mapToScene(QPointF(0, 0)).x() + calendar.width() - 8)
+                self.assertLessEqual(grid_right, card_right - 8)
+                self.assertAlmostEqual(grid_left - card_left, card_right - grid_right,
+                                       delta=24)
+                self.assertAlmostEqual(year_selector.mapToScene(QPointF(0, 0)).x()
+                                       + year_selector.width(), card_right - 22, delta=3)
+                self.assertAlmostEqual(title.mapToScene(QPointF(0, 0)).x(),
+                                       card_left + 22, delta=3)
             bridge._set_state(journal={**bridge.state["journal"],
                                        "year": 2012, "years": [2012]})
             self.app.processEvents()

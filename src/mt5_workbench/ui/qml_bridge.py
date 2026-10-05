@@ -11,21 +11,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
+import json
+import math
+import os
 import sqlite3
 import sys
+import tempfile
 import time
 from typing import Any, Callable
+from uuid import uuid4
 
 import MetaTrader5 as mt5
 from PySide6.QtCore import QObject, Property, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QFileDialog
 
 from mt5_workbench.config import DEFAULT_SYMBOL
 from mt5_workbench.domain.account_policy import is_usc_account
-from mt5_workbench.infrastructure.journal_db import JournalRepository
+from mt5_workbench.infrastructure.journal_db import (
+    JournalRepository, MAX_IMAGES, MAX_IMAGE_BYTES,
+)
 from mt5_workbench.services.dashboard_data import load_dashboard
 from mt5_workbench.services.ema_monitor import fetch_m1_ema_snapshot
 from mt5_workbench.services.journal_positions import (
@@ -36,6 +45,8 @@ from mt5_workbench.ui.theme import load_theme, save_theme
 
 
 PAGE_NAMES = frozenset({"dashboard", "orders", "journal", "optimizer", "controls", "monitor"})
+DEFAULT_REFRESH_INTERVALS = {"quote": 1, "positions": 5, "orders": 30}
+MAX_REFRESH_SECONDS = 3600
 READ_ONLY_CALLS = frozenset({
     "account_info", "terminal_info", "symbol_info", "symbol_info_tick",
     "copy_rates_from_pos", "positions_get", "orders_get",
@@ -47,6 +58,53 @@ def _state_directory(kind: str) -> Path:
     base = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
             else Path(__file__).resolve().parents[3])
     return base / "state" / kind
+
+
+def _refresh_settings_path() -> Path:
+    return _state_directory("refresh_intervals.json")
+
+
+def _load_refresh_intervals() -> dict[str, int]:
+    """Load read-only polling preferences, ignoring invalid saved values."""
+    result = dict(DEFAULT_REFRESH_INTERVALS)
+    try:
+        saved = json.loads(_refresh_settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return result
+    if not isinstance(saved, dict):
+        return result
+    for kind in result:
+        value = saved.get(kind)
+        if type(value) is int and 1 <= value <= MAX_REFRESH_SECONDS:
+            result[kind] = value
+    return result
+
+
+def _save_refresh_intervals(intervals: dict[str, int]) -> bool:
+    """Persist polling preferences atomically without changing theme settings."""
+    path = _refresh_settings_path()
+    temporary: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", prefix=".refresh_intervals-",
+            suffix=".tmp", dir=path.parent, delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(intervals, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        return True
+    except OSError:
+        return False
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _number(value: Any) -> float | None:
@@ -95,6 +153,7 @@ def _empty_state(symbol: str, theme: str) -> dict[str, Any]:
         "theme": theme,
         "page": "dashboard",
         "fullscreen": False,
+        "refreshIntervals": dict(DEFAULT_REFRESH_INTERVALS),
         "connection": {"connected": False, "locked": False, "message": "正在连接 MT5"},
         "account": {},
         "market": {"symbol": symbol, "bid": None, "ask": None,
@@ -243,6 +302,8 @@ class QmlBridge(QObject):
         self.tick = None
         self.journal_account_key: tuple[int, str] | None = None
         self._state = _empty_state(symbol_name, load_theme())
+        self._owned_draft_images: set[Path] = set()
+        self._state["refreshIntervals"] = _load_refresh_intervals()
         self._closing = False
         self._reconnect_pending = False
         self._jobs: dict[str, _Job] = {}
@@ -251,6 +312,7 @@ class QmlBridge(QObject):
         self._results: Queue[tuple[str, int, tuple[Any, ...], dict[str, Any] | None, str]] = Queue()
         self._result_waiting: dict[str, tuple[str, int, tuple[Any, ...], dict[str, Any] | None, str]] = {}
         self._last_requested: dict[str, float] = {}
+        self._last_quote_at = 0.0
         try:
             self.journal_repo = (journal_repository if journal_repository is not None
                                  else JournalRepository(_state_directory("journal")))
@@ -279,6 +341,15 @@ class QmlBridge(QObject):
         changed = {name: value for name, value in sections.items()
                    if self._state.get(name) != value}
         if changed:
+            if "journal" in changed:
+                retained = {Path(str(row.get("path", ""))) for row in
+                            changed["journal"].get("draftImages", [])}
+                for path in self._owned_draft_images - retained:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                self._owned_draft_images.intersection_update(retained)
             self._state = {**self._state, **changed}
             for name, value in changed.items():
                 self.sectionChanged.emit(name, value)
@@ -298,6 +369,7 @@ class QmlBridge(QObject):
             job.cancelled.set()
         self._pending_jobs.clear()
         self._last_requested.clear()
+        self._last_quote_at = 0.0
 
     def _clear_session(self, message: str, *, locked: bool = False,
                        current_account: Any = None) -> None:
@@ -310,6 +382,7 @@ class QmlBridge(QObject):
         clean = _empty_state(self.symbol_name, self._state["theme"])
         clean["page"] = self._state["page"]
         clean["fullscreen"] = self._state["fullscreen"]
+        clean["refreshIntervals"] = self._state["refreshIntervals"]
         clean["connection"] = {
             "connected": False, "locked": locked, "message": message,
             "currentAccount": (_account_map(current_account)
@@ -427,15 +500,34 @@ class QmlBridge(QObject):
             return
         if not self.connected or not self.check_account_access():
             return
-        self._quote()
+        now = time.monotonic()
+        intervals = self._state["refreshIntervals"]
+        if force or now - self._last_quote_at >= intervals["quote"]:
+            self._last_quote_at = now
+            self._quote()
+        else:
+            market = self._state["market"]
+            quote_time = market.get("time", "")
+            if quote_time and not market.get("stale"):
+                try:
+                    expired = time.time() - datetime.fromisoformat(quote_time).timestamp() > 15
+                except (ValueError, TypeError, OverflowError):
+                    expired = True
+                if expired:
+                    self._set_state(market={**market, "stale": True})
         page = self._state["page"]
-        if page == "dashboard" and (force or time.monotonic()
-                                    - self._last_requested.get("books", 0) >= 5):
-            self.refresh_books(force=force)
-        intervals = {"dashboard": 60, "orders": 30, "journal": 30,
-                     "monitor": 1}
-        if page in intervals and (force or time.monotonic() - self._last_requested.get(page, 0)
-                                  >= intervals[page]):
+        if page == "dashboard":
+            positions_due = (force or now - self._last_requested.get("book_positions", 0)
+                             >= intervals["positions"])
+            orders_due = (force or now - self._last_requested.get("book_orders", 0)
+                          >= intervals["orders"])
+            if positions_due or orders_due:
+                self.refresh_books(force=force, include_positions=positions_due,
+                                   include_orders=orders_due)
+        page_intervals = {"dashboard": 60, "orders": intervals["orders"],
+                          "journal": 30, "monitor": intervals["quote"]}
+        if page in page_intervals and (force or now - self._last_requested.get(page, 0)
+                                       >= page_intervals[page]):
             self._refresh_page(page, force=force)
 
     def _request_job(self, kind: str, key: tuple[Any, ...],
@@ -553,7 +645,10 @@ class QmlBridge(QObject):
                 else:
                     self._set_state(**{kind: data})
                 if kind == "dashboard":
-                    self._quote()
+                    now = time.monotonic()
+                    if now - self._last_quote_at >= self._state["refreshIntervals"]["quote"]:
+                        self._last_quote_at = now
+                        self._quote()
                 self._set_status({"dashboard": "总览看板已更新",
                                   "orders": "交易概览已更新",
                                   "journal": "行情日志已更新",
@@ -572,16 +667,20 @@ class QmlBridge(QObject):
                             "spreadPoints": data.get("emaSpreadPoints")})
         return history[-60:]
 
-    def refresh_books(self, *, force: bool = False) -> None:
-        """Read the dashboard's live XAUUSDc positions and pending orders."""
+    def refresh_books(self, *, force: bool = False,
+                      include_positions: bool = True,
+                      include_orders: bool = True) -> None:
+        """Read the due XAUUSDc book sections without polling both at once."""
+        if not include_positions and not include_orders:
+            return
         if not self.connected or not self.check_account_access():
             return
         identity, symbol = self._identity(), self.symbol_name
 
         def load(api: Any) -> dict[str, Any]:
-            active = api.positions_get(symbol=symbol)
-            pending = api.orders_get(symbol=symbol)
-            if active is None or pending is None:
+            active = api.positions_get(symbol=symbol) if include_positions else ()
+            pending = api.orders_get(symbol=symbol) if include_orders else ()
+            if (include_positions and active is None) or (include_orders and pending is None):
                 raise RuntimeError(f"当前持仓或挂单读取失败：{api.last_error()}")
             buy_type = getattr(api, "POSITION_TYPE_BUY", 0)
             order_types = {
@@ -589,8 +688,9 @@ class QmlBridge(QObject):
                 for name in ("BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP",
                              "BUY_STOP_LIMIT", "SELL_STOP_LIMIT")
             }
-            return {
-                "positions": [
+            result: dict[str, Any] = {"bookError": ""}
+            if include_positions:
+                result["positions"] = [
                     {"ticket": _row_value(row, "ticket"), "symbol": _row_value(row, "symbol"),
                      "side": "BUY" if _row_value(row, "type") == buy_type else "SELL",
                      "volume": _number(_row_value(row, "volume")),
@@ -599,19 +699,25 @@ class QmlBridge(QObject):
                      "sl": _number(_row_value(row, "sl")),
                      "tp": _number(_row_value(row, "tp")),
                      "profit": _number(_row_value(row, "profit"))}
-                    for row in active],
-                "orders": [
+                    for row in active]
+            if include_orders:
+                result["orders"] = [
                     {"ticket": _row_value(row, "ticket"), "symbol": _row_value(row, "symbol"),
                      "type": order_types.get(_row_value(row, "type"), "PENDING"),
                      "volume": _number(_row_value(row, "volume_current")),
                      "priceOpen": _number(_row_value(row, "price_open")),
                      "sl": _number(_row_value(row, "sl")),
                      "tp": _number(_row_value(row, "tp"))}
-                    for row in pending],
-                "bookError": "",
-            }
+                    for row in pending]
+            return result
 
-        self._request_job("books", (identity,), load, force=force)
+        self._request_job("books", (identity, include_positions, include_orders),
+                          load, force=force)
+        requested_at = time.monotonic()
+        if include_positions:
+            self._last_requested["book_positions"] = requested_at
+        if include_orders:
+            self._last_requested["book_orders"] = requested_at
 
     def _refresh_page(self, page: str, *, force: bool = False) -> None:
         if not self.connected or not self.check_account_access():
@@ -623,7 +729,8 @@ class QmlBridge(QObject):
             account, tick, symbol = self.account, self.tick, self.symbol_name
 
             def load(api: Any) -> dict[str, Any]:
-                data = load_dashboard(symbol, account, tick, api=api)
+                data = load_dashboard(symbol, account, tick, api=api,
+                                      include_books=False)
                 return {
                     "loading": False, "candles": [
                         {"time": _iso(row.time), "open": row.open, "high": row.high,
@@ -764,6 +871,65 @@ class QmlBridge(QObject):
 
         self._request_job("journal", (account_key, page, year), load, force=force)
 
+    @Slot(result=bool)
+    def hasJournalImageOnClipboard(self) -> bool:
+        """Let the composer intercept Ctrl+V only for an actual image."""
+        clipboard = QGuiApplication.clipboard()
+        mime = clipboard.mimeData() if clipboard is not None else None
+        return bool(mime is not None and mime.hasImage())
+
+    def _paste_journal_image(self) -> None:
+        draft = list(self._state["journal"].get("draftImages", []))
+        if len(draft) >= MAX_IMAGES:
+            self._set_status(f"每篇日志最多附带 {MAX_IMAGES} 张图片")
+            return
+        if self.journal_repo is None:
+            self._set_status(self.journal_error or "本地日志不可用")
+            return
+        if not self.check_account_access():
+            return
+        account_key = self._identity()
+        if account_key is None:
+            return
+        clipboard = QGuiApplication.clipboard()
+        image = clipboard.image() if clipboard is not None else None
+        if image is None or image.isNull():
+            self._set_status("剪贴板里没有可粘贴的图片")
+            return
+        if image.width() * image.height() > 40_000_000:
+            self._set_status("图片尺寸过大，最多 4000 万像素")
+            return
+
+        # Drafts are local, account-scoped files. The repository copies them
+        # into its permanent image store only after publication succeeds.
+        login, server = account_key
+        server_key = sha256(server.encode("utf-8")).hexdigest()[:16]
+        path = self.journal_repo.base_dir / "drafts" / str(login) / server_key / f"{uuid4().hex}.png"
+        added = False
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not image.save(str(path), "PNG"):
+                raise ValueError("剪贴板图片无法保存")
+            if path.stat().st_size > MAX_IMAGE_BYTES:
+                raise ValueError("单张图片不得超过 8 MiB")
+            self.journal_repo._check_image(path)
+            if not self.check_account_access() or self._identity() != account_key:
+                return
+            self._owned_draft_images.add(path)
+            draft.append({"path": str(path), "name": "粘贴的图片.png",
+                          "url": QUrl.fromLocalFile(str(path)).toString()})
+            self._set_state(journal={**self._state["journal"], "draftImages": draft})
+            self._set_status("已从剪贴板添加图片")
+            added = True
+        except (OSError, ValueError) as exc:
+            self._set_status(f"无法粘贴图片：{exc}")
+        finally:
+            if not added:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
     @Slot(str, "QVariantMap")
     def perform(self, action: str, payload: dict[str, Any]) -> None:
         """Dispatch a QML action. A subclass owns every account mutation."""
@@ -793,6 +959,23 @@ class QmlBridge(QObject):
             return
         if action == "toggleFullscreen":
             self._set_state(fullscreen=not self._state["fullscreen"])
+            return
+        if action == "setRefreshInterval":
+            kind = str(values.get("kind", ""))
+            seconds = values.get("seconds")
+            if (kind not in DEFAULT_REFRESH_INTERVALS or isinstance(seconds, bool)
+                    or not isinstance(seconds, (int, float))
+                    or not math.isfinite(seconds) or int(seconds) != seconds
+                    or not 1 <= seconds <= MAX_REFRESH_SECONDS):
+                self._set_status("刷新间隔必须是 1–3600 秒的整数")
+                return
+            seconds = int(seconds)
+            updated = {**self._state["refreshIntervals"], kind: seconds}
+            self._set_state(refreshIntervals=updated)
+            label = {"quote": "报价", "positions": "持仓", "orders": "订单"}[kind]
+            self._set_status(f"{label}刷新间隔已设为 {seconds} 秒")
+            if not _save_refresh_intervals(updated):
+                self._set_status("刷新间隔已生效，但保存失败；重启后将恢复原设置")
             return
         if action == "refresh":
             page = str(values.get("page") or self._state["page"])
@@ -848,16 +1031,19 @@ class QmlBridge(QObject):
                     path = Path(name).resolve()
                     if str(path) in selected:
                         continue
-                    if len(draft) >= 4:
-                        self._set_status("每篇日志最多附带 4 张图片")
+                    if len(draft) >= MAX_IMAGES:
+                        self._set_status(f"每篇日志最多附带 {MAX_IMAGES} 张图片")
                         break
-                    if not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
-                        self._set_status("图片不存在或超过 8 MB")
+                    if not path.is_file() or path.stat().st_size > MAX_IMAGE_BYTES:
+                        self._set_status("图片不存在或超过 8 MiB")
                         continue
                     draft.append({"path": str(path), "name": path.name,
                                   "url": QUrl.fromLocalFile(str(path)).toString()})
                     selected.add(str(path))
                 self._set_state(journal={**self._state["journal"], "draftImages": draft})
+            return
+        if action == "journalPasteImage":
+            self._paste_journal_image()
             return
         if action == "journalRemoveImage":
             target = str(values.get("path", ""))
@@ -889,6 +1075,12 @@ class QmlBridge(QObject):
         self._timer.stop()
         self._results_timer.stop()
         self._cancel_jobs()
+        for path in self._owned_draft_images:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        self._owned_draft_images.clear()
         if self.initialized and not self._jobs:
             self._api.shutdown()
             self.initialized = False
