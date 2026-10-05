@@ -9,8 +9,9 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QPointF, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickItem
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
@@ -55,9 +56,36 @@ class QmlUiTests(unittest.TestCase):
             self.assertEqual(window.property("themeName"), "dark")
             for width, height in ((1200, 800), (1440, 900), (2560, 1440)):
                 window.resize(width, height)
+                bridge.perform("navigate", {"page": "journal"})
                 self.app.processEvents()
                 self.assertEqual(window.width(), width)
                 self.assertEqual(window.height(), height)
+                calendar = window.findChild(QQuickItem, "journalHeatmapCard")
+                months = window.findChild(QQuickItem, "journalHeatmapMonths")
+                grid = window.findChild(QQuickItem, "journalHeatmapGrid")
+                self.assertIsNotNone(calendar)
+                self.assertIsNotNone(months)
+                self.assertIsNotNone(grid)
+                self.assertLessEqual(calendar.width(), 1081)
+                self.assertAlmostEqual(months.width(), grid.width(), delta=2)
+                self.assertAlmostEqual(months.mapToScene(QPointF(0, 0)).x(),
+                                       grid.mapToScene(QPointF(0, 0)).x(), delta=3)
+                self.assertLessEqual(grid.mapToScene(QPointF(0, 0)).x() + grid.width(),
+                                     calendar.mapToScene(QPointF(0, 0)).x() + calendar.width() - 8)
+            bridge._set_state(journal={**bridge.state["journal"],
+                                       "year": 2012, "years": [2012]})
+            self.app.processEvents()
+            journal_view = window.findChild(QQuickItem, "journalView")
+            self.assertEqual(journal_view.property("calendarWeeks"), 54)
+            bridge.perform("navigate", {"page": "orders"})
+            self.app.processEvents()
+            drawdown = window.findChild(QQuickItem, "tradeDrawdownCard")
+            statuses = window.findChild(QQuickItem, "tradeStatusCard")
+            self.assertIsNotNone(drawdown)
+            self.assertIsNotNone(statuses)
+            self.assertAlmostEqual(drawdown.mapToScene(QPointF(0, 0)).y(),
+                                   statuses.mapToScene(QPointF(0, 0)).y(), delta=2)
+            self.assertAlmostEqual(drawdown.height(), statuses.height(), delta=2)
             self.assertFalse(window.grabWindow().isNull())
             window.close()
         finally:

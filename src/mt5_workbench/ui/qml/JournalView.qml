@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    objectName: "journalView"
     property var ui
     property var pageData: ({})
     property var bridge
@@ -12,6 +13,8 @@ Item {
     property var selectedPositionIds: []
     property int lastPublishedRevision: 0
     property string lastAccountLabel: ""
+    readonly property int calendarWeeks: weeksInYear()
+    readonly property real calendarGridWidth: calendarWeeks * cellSize() + (calendarWeeks - 1) * 3
 
     onPageDataChanged: {
         var label = String(root.value("accountLabel", ""))
@@ -48,6 +51,19 @@ Item {
     function dayCount(key) {
         var counts = root.value("heatmap", {})
         return Number(counts[key] || 0)
+    }
+    function monthWeekIndex(month) {
+        var year = Number(root.value("year", new Date().getFullYear()))
+        var first = new Date(year, 0, 1)
+        var mondayOffset = (first.getDay() + 6) % 7
+        var elapsedDays = Math.round((Date.UTC(year, month, 1) - Date.UTC(year, 0, 1)) / 86400000)
+        return Math.floor((mondayOffset + elapsedDays) / 7)
+    }
+    function weeksInYear() {
+        var year = Number(root.value("year", new Date().getFullYear()))
+        var mondayOffset = (new Date(year, 0, 1).getDay() + 6) % 7
+        var days = Math.round((Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 86400000)
+        return Math.ceil((mondayOffset + days) / 7)
     }
     function togglePosition(id, selected) {
         var current = root.selectedPositionIds.slice()
@@ -205,8 +221,11 @@ Item {
             }
 
             UiCard {
+                objectName: "journalHeatmapCard"
                 ui: root.ui
                 Layout.fillWidth: true
+                Layout.maximumWidth: 1080
+                Layout.alignment: Qt.AlignHCenter
                 padding: 22
                 spacing: 12
                 RowLayout {
@@ -228,15 +247,16 @@ Item {
                         font.family: root.ui.fontFamily; font.pixelSize: 13
                     }
                 }
-                Row {
-                    Layout.fillWidth: true
-                    width: parent.width
-                    spacing: 2
+                Item {
+                    objectName: "journalHeatmapMonths"
+                    Layout.leftMargin: 20
+                    Layout.preferredWidth: root.calendarGridWidth
+                    Layout.preferredHeight: 16
                     Repeater {
                         model: 12
                         delegate: Text {
                             required property int index
-                            width: (parent.width - 22) / 12
+                            x: root.monthWeekIndex(index) * (root.cellSize() + 3)
                             text: String(index + 1) + "月"
                             color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11
                         }
@@ -255,10 +275,11 @@ Item {
                     }
                     Row {
                         id: heatmapRow
-                        Layout.fillWidth: true
+                        objectName: "journalHeatmapGrid"
+                        Layout.preferredWidth: root.calendarGridWidth
                         spacing: 3
                         Repeater {
-                            model: 53
+                            model: root.calendarWeeks
                             delegate: Column {
                                 required property int index
                                 property int week: index
@@ -280,9 +301,11 @@ Item {
                             }
                         }
                     }
+                    Item { Layout.fillWidth: true }
                 }
                 RowLayout {
-                    Layout.fillWidth: true
+                    Layout.leftMargin: 20
+                    Layout.preferredWidth: root.calendarGridWidth
                     Item { Layout.fillWidth: true }
                     Text { text: "少"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11 }
                     Repeater { model: [0, 0.48, 0.66, 0.82, 1]
@@ -367,6 +390,6 @@ Item {
     }
 
     function cellSize() {
-        return Math.max(8, Math.min(15, Math.floor((root.width - 125) / 53) - 3))
+        return Math.max(8, Math.min(15, Math.floor((root.width - 125) / root.calendarWeeks) - 3))
     }
 }

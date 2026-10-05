@@ -262,6 +262,7 @@ Item {
                 columnSpacing: 12
                 rowSpacing: 12
                 UiCard {
+                    objectName: "tradeDrawdownCard"
                     ui: page.ui
                     Layout.fillWidth: true
                     padding: 20
@@ -283,8 +284,10 @@ Item {
                     }
                 }
                 UiCard {
+                    objectName: "tradeStatusCard"
                     ui: page.ui
                     Layout.fillWidth: true
+                    Layout.fillHeight: true
                     padding: 20
                     spacing: 12
                     Text { text: "历史订单状态"; color: ui.text; font.family: ui.fontFamily; font.pixelSize: 15; font.weight: Font.DemiBold }
