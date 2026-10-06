@@ -133,6 +133,7 @@ Item {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: UiScrollBar { ui: root.ui }
 
         ColumnLayout {
             x: 24
@@ -228,14 +229,15 @@ Item {
                 Text { visible: !root.value("positions", []).length; text: "当前没有可关联的持仓"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13 }
                 Repeater {
                     model: root.value("positions", [])
-                    delegate: CheckBox {
+                    delegate: UiCheckBox {
+                        ui: root.ui
                         required property var modelData
+                        objectName: "journalPositionCheck_" + modelData.positionId
                         Layout.fillWidth: true
                         text: "#" + String(modelData.ticket || modelData.positionId) + "  ·  " + String(modelData.side || "—") + " " + String(modelData.symbol || "—") + "  ·  " + String(modelData.volume === null || modelData.volume === undefined ? "—" : modelData.volume) + " lot  ·  浮动 " + String(modelData.floatingUsd === null || modelData.floatingUsd === undefined ? "—" : modelData.floatingUsd) + " USD"
                         checked: root.selectedPositionIds.indexOf(Number(modelData.positionId)) >= 0
                         onClicked: root.togglePosition(modelData.positionId, checked)
                         font.family: root.ui.fontFamily; font.pixelSize: 13
-                        palette.text: root.ui.text
                     }
                 }
                 RowLayout {
@@ -281,10 +283,11 @@ Item {
                         spacing: 12
                         Text { text: String(root.value("yearTotal", 0)) + " 篇"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                         Text { text: "年份"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
-                        ComboBox {
+                        UiComboBox {
+                            ui: root.ui
                             id: yearSelector
                             objectName: "journalYearSelector"
-                            Layout.preferredWidth: 112
+                            Layout.preferredWidth: 140
                             model: root.value("years", [root.currentYear()])
                             currentIndex: Math.max(0, root.value("years", [root.currentYear()]).indexOf(Number(root.value("year", root.currentYear()))))
                             displayText: String(root.value("year", root.currentYear())) + " 年"
@@ -347,8 +350,11 @@ Item {
                                             width: root.cellSize(); height: width; radius: 2
                                             color: key === "" ? "transparent" : count > 0 ? root.ui.accent : root.ui.surfaceAlt
                                             opacity: count === 0 ? 1 : count === 1 ? 0.48 : count <= 3 ? 0.66 : count <= 6 ? 0.82 : 1
-                                            ToolTip.visible: hover.hovered && key !== ""
-                                            ToolTip.text: key + " · " + count + " 篇记录"
+                                            UiToolTip {
+                                                ui: root.ui
+                                                visible: hover.hovered && parent.key !== ""
+                                                text: parent.key + " · " + parent.count + " 篇记录"
+                                            }
                                             HoverHandler { id: hover }
                                         }
                                     }

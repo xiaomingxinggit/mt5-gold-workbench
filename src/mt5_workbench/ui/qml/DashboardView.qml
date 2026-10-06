@@ -32,7 +32,7 @@ Item {
         clip: true
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+        ScrollBar.vertical: UiScrollBar { ui: page.ui; policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             x: 24

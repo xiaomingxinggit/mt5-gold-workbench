@@ -13,6 +13,20 @@ ApplicationWindow {
     title: "MT5 黄金交易工作台"
     color: theme.bg
 
+    // Native text selection and any inherited controls share the app theme.
+    palette.window: theme.bg
+    palette.windowText: theme.text
+    palette.base: theme.surface
+    palette.alternateBase: theme.surfaceAlt
+    palette.text: theme.text
+    palette.button: theme.surfaceAlt
+    palette.buttonText: theme.text
+    palette.highlight: theme.accent
+    palette.highlightedText: theme.accentText
+    palette.placeholderText: theme.muted
+    palette.toolTipBase: theme.surfaceAlt
+    palette.toolTipText: theme.text
+
     property var backend: bridge
     property var connection: ({})
     property var account: ({})
@@ -647,6 +661,7 @@ ApplicationWindow {
                 clip: true
                 contentWidth: availableWidth
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical: UiScrollBar { ui: theme }
                 ColumnLayout {
                     width: confirmScroll.availableWidth
                     spacing: 12
@@ -692,6 +707,7 @@ ApplicationWindow {
                                         font.pixelSize: 11
                                         font.weight: Font.DemiBold
                                         Layout.fillWidth: true
+                                        Layout.preferredWidth: 1
                                         elide: Text.ElideRight
                                     }
                                 }
@@ -720,6 +736,7 @@ ApplicationWindow {
                                             font.family: theme.fontFamily
                                             font.pixelSize: 11
                                             Layout.fillWidth: true
+                                            Layout.preferredWidth: 1
                                             elide: Text.ElideRight
                                         }
                                     }

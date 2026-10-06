@@ -28,6 +28,7 @@ Item {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: UiScrollBar { ui: root.ui }
         GridLayout {
             x: 24; y: 24
             width: Math.max(0, viewport.width - 48)
@@ -51,7 +52,7 @@ Item {
                             Layout.fillWidth: true; implicitHeight: 44; radius: 9
                             color: selected ? tone : root.ui.surfaceAlt
                             border.color: selected ? tone : root.ui.border
-                            Text { anchors.centerIn: parent; text: modelData.title; color: parent.selected ? (root.ui.dark ? root.ui.accentText : "#FFFFFF") : root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
+                            Text { anchors.centerIn: parent; text: modelData.title; color: parent.selected ? root.ui.accentText : root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
                             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.updateField("side", modelData.side) }
                         }
                     }

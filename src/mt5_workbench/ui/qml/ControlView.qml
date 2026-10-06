@@ -78,6 +78,7 @@ Item {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: UiScrollBar { ui: root.ui }
 
         ColumnLayout {
             x: 24
@@ -106,35 +107,23 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 22
-                    RadioButton {
+                    UiRadioButton {
                         id: symbolScope
+                        ui: root.ui
+                        objectName: "symbolScope"
                         enabled: !root.busy
                         text: "仅当前品种 XAUUSDc"
                         checked: root.scope === "symbol"
                         onClicked: root.changeScope("symbol")
-                        font.family: root.ui.fontFamily; font.pixelSize: 14
-                        contentItem: Text {
-                            text: symbolScope.text
-                            color: root.ui.text
-                            font.family: root.ui.fontFamily; font.pixelSize: 14
-                            verticalAlignment: Text.AlignVCenter
-                            leftPadding: symbolScope.indicator.width + symbolScope.spacing
-                        }
                     }
-                    RadioButton {
+                    UiRadioButton {
                         id: accountScope
+                        ui: root.ui
+                        objectName: "accountScope"
                         enabled: !root.busy
                         text: "整个账户 · 所有品种"
                         checked: root.scope === "account"
                         onClicked: root.changeScope("account")
-                        font.family: root.ui.fontFamily; font.pixelSize: 14
-                        contentItem: Text {
-                            text: accountScope.text
-                            color: root.ui.text
-                            font.family: root.ui.fontFamily; font.pixelSize: 14
-                            verticalAlignment: Text.AlignVCenter
-                            leftPadding: accountScope.indicator.width + accountScope.spacing
-                        }
                     }
                     Item { Layout.fillWidth: true }
                 }
@@ -165,7 +154,7 @@ Item {
                             onClicked: root.selectAll(checkState !== Qt.Unchecked)
                         }
                         Repeater { model: ["Ticket", "品种", "方向", "手数", "开仓价", "止损", "止盈", "浮盈亏"]
-                            delegate: Text { required property var modelData; Layout.fillWidth: true; text: modelData; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight } }
+                            delegate: Text { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; text: modelData; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight } }
                     }
                 }
                 Text { visible: !root.value("positions", []).length; text: "当前范围内没有持仓"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13; Layout.topMargin: 10; Layout.bottomMargin: 10 }
@@ -173,6 +162,7 @@ Item {
                     model: root.value("positions", [])
                     delegate: Rectangle {
                         id: positionRow
+                        objectName: "controlPositionRow_" + index
                         required property var modelData
                         required property int index
                         Layout.fillWidth: true; implicitHeight: 36; radius: 7
@@ -188,7 +178,7 @@ Item {
                             }
                             Repeater {
                                 model: [modelData.ticket, modelData.symbol, modelData.side, modelData.volume, modelData.openPrice, modelData.sl, modelData.tp, modelData.profit]
-                                delegate: Text { required property var modelData; Layout.fillWidth: true; text: String(modelData === undefined || modelData === null ? "—" : modelData); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 12; elide: Text.ElideRight }
+                                delegate: Text { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; text: String(modelData === undefined || modelData === null ? "—" : modelData); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 12; elide: Text.ElideRight }
                             }
                         }
                     }
@@ -378,7 +368,7 @@ Item {
                         RowLayout {
                             anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
                             Repeater { model: ["Ticket", "品种", "类型", "手数", "挂单价", "止损"]
-                                delegate: Text { required property var modelData; Layout.fillWidth: true; text: modelData; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight } }
+                                delegate: Text { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; text: modelData; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight } }
                         }
                     }
                     Text { visible: !root.value("orders", []).length; text: "当前范围内没有挂单"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13; Layout.topMargin: 10; Layout.bottomMargin: 10 }
@@ -387,13 +377,14 @@ Item {
                         delegate: Rectangle {
                             required property var modelData
                             required property int index
+                            objectName: "controlPendingOrderRow_" + index
                             Layout.fillWidth: true; implicitHeight: 36; radius: 7
                             color: index % 2 ? root.ui.surfaceAlt : root.ui.surface
                             RowLayout {
                                 anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
                                 Repeater {
                                     model: [modelData.ticket, modelData.symbol, modelData.type, modelData.volume, modelData.price, modelData.stop]
-                                    delegate: Text { required property var modelData; Layout.fillWidth: true; text: String(modelData === undefined || modelData === null ? "—" : modelData); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 12; elide: Text.ElideRight }
+                                    delegate: Text { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; text: String(modelData === undefined || modelData === null ? "—" : modelData); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 12; elide: Text.ElideRight }
                                 }
                             }
                         }

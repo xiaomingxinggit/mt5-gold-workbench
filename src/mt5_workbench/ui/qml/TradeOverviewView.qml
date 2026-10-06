@@ -48,7 +48,7 @@ Item {
         clip: true
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+        ScrollBar.vertical: UiScrollBar { ui: page.ui; policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             x: 24
@@ -125,28 +125,16 @@ Item {
                         font.family: ui.fontFamily
                         font.pixelSize: 12
                     }
-                    ComboBox {
+                    UiComboBox {
                         id: period
+                        objectName: "tradePeriodSelector"
+                        ui: page.ui
                         model: ["近 7 日", "近 30 日", "近 90 日"]
                         property var periods: [7, 30, 90]
                         currentIndex: Math.max(0, periods.indexOf(Number(page.pageData.days || 30)))
-                        Layout.preferredWidth: 112
+                        Layout.preferredWidth: 140
                         Layout.preferredHeight: 38
-                        onActivated: page.filters(page.pageData.scope || "symbol", periods[index])
-                        background: Rectangle {
-                            radius: 9
-                            color: ui.surfaceAlt
-                            border.width: 1
-                            border.color: ui.border
-                        }
-                        contentItem: Text {
-                            text: period.displayText
-                            color: ui.text
-                            font.family: ui.fontFamily
-                            font.pixelSize: 12
-                            leftPadding: 12
-                            verticalAlignment: Text.AlignVCenter
-                        }
+                        onActivated: function(index) { page.filters(page.pageData.scope || "symbol", periods[index]) }
                     }
                     UiButton {
                         ui: page.ui

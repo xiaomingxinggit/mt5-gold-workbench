@@ -61,8 +61,15 @@ Item {
     onUiChanged: canvas.requestPaint()
     onHoverIndexChanged: canvas.requestPaint()
 
+    // The Theme object stays the same when its colors change.
+    Connections {
+        target: chart.ui
+        function onDarkChanged() { canvas.requestPaint() }
+    }
+
     Canvas {
         id: canvas
+        objectName: "dataChartCanvas"
         anchors.fill: parent
         renderTarget: Canvas.FramebufferObject
         onWidthChanged: requestPaint()

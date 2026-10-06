@@ -75,8 +75,8 @@ Popup {
                     autoTransform: true
                     asynchronous: true
                 }
-                ScrollBar.vertical: ScrollBar {}
-                ScrollBar.horizontal: ScrollBar {}
+                ScrollBar.vertical: UiScrollBar { ui: viewer.ui }
+                ScrollBar.horizontal: UiScrollBar { ui: viewer.ui }
             }
             Text {
                 anchors.centerIn: parent

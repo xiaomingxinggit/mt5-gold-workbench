@@ -10,6 +10,10 @@
 
 当前界面的颜色 token 统一放在 [`ui/qml/Theme.qml`](../src/mt5_workbench/ui/qml/Theme.qml)。背景、表面、边框、正文、次级文字、强调色、盈亏和警示色均使用语义属性；两种主题保持相同的信息层级和控件位置。`ui/theme.py` 负责读取与保存主题偏好，旧版 QWidget 的调色板也保留在那里。图表网格始终弱于数据线；收益、亏损与操作风险除颜色外还要有数值、符号或文字。
 
+主题覆盖包括有数据的表格行、下拉列表及悬停选项、单选框、复选框、提示框、文本选择、滚动条和弹窗。统一使用 `UiComboBox`、`UiRadioButton`、`UiCheckBox`、`UiToolTip`、`UiScrollBar`，不依赖 Windows 当前主题来决定应用内颜色。`ApplicationWindow.palette` 同步主题的语义颜色；系统文件选择窗口保留原生行为。
+
+Repeater/ListView 的 delegate 一旦声明 required 属性，使用 `index` 时必须同时声明 `required property int index`，防止颜色绑定失败而回退到白色。表格头与数据单元格采用相同的列宽约束。Canvas 图表监听 `Theme.darkChanged`，切换主题时主动重绘。回归检查必须注入至少两行持仓、挂单、测算结果以及日志回复，不能只检查空页面。
+
 全局字体为 Microsoft YaHei UI，系统未安装时由 Qt 回退。文本统一用像素字号：辅助 11–12、正文 13–14、分区标题 16–18、页面标题 28、关键数值 22–28。标签和正文优先常规字重，导航选中项、标题和关键数值使用 DemiBold。手数、价格、资金和时间明确标注单位或数据口径；缺失值用“—”，加载中与过期报价必须有文字状态。USC 账户中 **100 USC = 1 USD**，美元风险要显式标为 USD。
 
 界面不使用品牌 LOGO。操作图标的 SVG 源文件位于 [`ui/resources/icons/svg/`](../src/mt5_workbench/ui/resources/icons/README.md)，按明暗主题加载；图标与按钮文字配对使用。卡片采用表面色、细边框和圆角，不叠加厚重阴影。滚动条只在内容超出时出现。

@@ -100,6 +100,7 @@ UiCard {
             model: table.rows ? table.rows.slice(0, table.visibleRows) : []
             delegate: Rectangle {
                 id: recordRow
+                objectName: "recordRow_" + table.title + "_" + index
                 required property var modelData
                 required property int index
                 property var record: modelData

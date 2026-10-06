@@ -30,6 +30,7 @@ Item {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: UiScrollBar { ui: root.ui }
 
         ColumnLayout {
             x: 24

@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    objectName: "advancedOrderEntryView"
     property var ui
     property var pageData: ({})
     property var bridge
@@ -48,6 +49,7 @@ Item {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: UiScrollBar { ui: root.ui }
 
         ColumnLayout {
             x: 24
@@ -126,73 +128,16 @@ Item {
                         Layout.fillWidth: true
                         spacing: 7
                         Text { text: "风险分配方式"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
-                        ComboBox {
+                        UiComboBox {
                             id: modeSelector
+                            ui: root.ui
                             objectName: "entryModeSelector"
                             Layout.fillWidth: true
                             Layout.preferredHeight: 42
                             model: ["加权分配 · 自定义风险比例", "等风险 · 每档承担相同风险", "覆盖区间 · 尽量增大总手数", "单点开仓 · 总手数最大"]
                             currentIndex: Math.max(0, root.modes.indexOf(root.form.mode))
                             onActivated: root.updateField("mode", root.modes[currentIndex])
-                            font.family: root.ui.fontFamily; font.pixelSize: 14
-                            background: Rectangle {
-                                radius: 9
-                                color: root.ui.surfaceAlt
-                                border.color: modeSelector.activeFocus ? root.ui.accent : root.ui.border
-                            }
-                            contentItem: Text {
-                                text: modeSelector.displayText
-                                color: root.ui.text
-                                font: modeSelector.font
-                                leftPadding: 12
-                                rightPadding: 34
-                                verticalAlignment: Text.AlignVCenter
-                                elide: Text.ElideRight
-                            }
-                            indicator: Text {
-                                x: modeSelector.width - width - 14
-                                y: (modeSelector.height - height) / 2
-                                text: "▾"
-                                color: root.ui.muted
-                                font.family: root.ui.fontFamily
-                                font.pixelSize: 16
-                            }
-                            delegate: ItemDelegate {
-                                width: modeSelector.width - 8
-                                height: 40
-                                text: modelData
-                                highlighted: modeSelector.highlightedIndex === index
-                                contentItem: Text {
-                                    text: parent.text
-                                    color: root.ui.text
-                                    font: modeSelector.font
-                                    leftPadding: 10
-                                    verticalAlignment: Text.AlignVCenter
-                                    elide: Text.ElideRight
-                                }
-                                background: Rectangle {
-                                    radius: 6
-                                    color: parent.highlighted ? root.ui.accentSoft : root.ui.surface
-                                }
-                            }
-                            popup: Popup {
-                                y: modeSelector.height + 4
-                                width: modeSelector.width
-                                padding: 4
-                                implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
-                                contentItem: ListView {
-                                    clip: true
-                                    implicitHeight: contentHeight
-                                    model: modeSelector.popup.visible ? modeSelector.delegateModel : null
-                                    currentIndex: modeSelector.highlightedIndex
-                                    ScrollIndicator.vertical: ScrollIndicator {}
-                                }
-                                background: Rectangle {
-                                    radius: 9
-                                    color: root.ui.surface
-                                    border.color: root.ui.border
-                                }
-                            }
+                            font.pixelSize: 14
                         }
                         Text { text: "权重 1,2,3 表示三个档位分别承担 1:2:3 的预算。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
@@ -243,7 +188,7 @@ Item {
                             anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
                             Repeater {
                                 model: ["档位", "建议类型", "入场价", "手数", "止损距离", "风险 USD"]
-                                delegate: Text { required property var modelData; Layout.fillWidth: true; text: modelData; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
+                                delegate: Text { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; text: modelData; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
                             }
                         }
                     }
@@ -257,6 +202,8 @@ Item {
                         model: root.resultStale ? [] : root.value("rows", [])
                         delegate: Rectangle {
                             required property var modelData
+                            required property int index
+                            objectName: "advancedOrderResultRow_" + index
                             Layout.fillWidth: true
                             implicitHeight: 38
                             radius: 7; color: index % 2 ? root.ui.surfaceAlt : root.ui.surface
@@ -267,6 +214,7 @@ Item {
                                     delegate: Text {
                                         required property var modelData
                                         Layout.fillWidth: true
+                                        Layout.preferredWidth: 1
                                         text: String(modelData === undefined || modelData === null ? "—" : modelData)
                                         color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 13
                                         elide: Text.ElideRight
