@@ -183,6 +183,19 @@ class QmlUiTests(unittest.TestCase):
                 QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
                 self.app.processEvents()
                 self.assertEqual(control_view.property("selectedTickets").toVariant(), expected)
+                if expected == ["124"]:
+                    snapshot = bridge.state["controls"]
+                    bridge._set_state(controls={**snapshot, "loading": True})
+                    self.app.processEvents()
+                    self.assertEqual(control_view.property("selectedTickets").toVariant(), ["124"])
+                    bridge._set_state(controls={**snapshot, "loading": False,
+                        "positions": [{**row, "profit": "25.50"} for row in snapshot["positions"]]})
+                    self.app.processEvents()
+                    self.assertEqual(control_view.property("selectedTickets").toVariant(), ["124"])
+                    row = visual_find(window.contentItem(), "controlPositionRow_0")
+                    texts = [cell.property("text") for layout in row.childItems()
+                             for cell in layout.childItems() if cell.inherits("QQuickText")]
+                    self.assertIn("25.50", texts)
             bridge._set_state(confirmation={"token": "preview-only", "selectable": True,
                 "selectedTickets": ["123", "124"], "columns": ["Ticket", "品种", "止盈"],
                 "rows": [["123", "XAUUSDc BUY", "4250"], ["124", "XAUUSDc BUY", "4250"]]})

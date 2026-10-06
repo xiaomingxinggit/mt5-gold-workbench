@@ -544,11 +544,17 @@ class QmlBridge(QObject):
             if positions_due or orders_due:
                 self.refresh_books(force=force, include_positions=positions_due,
                                    include_orders=orders_due)
+        elif page == "controls":
+            self._poll_controls(now, force=force)
         page_intervals = {"dashboard": 60, "orders": intervals["orders"],
                           "journal": 30, "monitor": intervals["quote"]}
         if page in page_intervals and (force or now - self._last_requested.get(page, 0)
                                        >= page_intervals[page]):
             self._refresh_page(page, force=force)
+
+    def _poll_controls(self, now: float, *, force: bool = False) -> None:
+        """The trading bridge supplies the account-scoped control book reader."""
+        pass
 
     def _request_job(self, kind: str, key: tuple[Any, ...],
                      loader: Callable[[Any], dict[str, Any]], *, force: bool = False) -> None:

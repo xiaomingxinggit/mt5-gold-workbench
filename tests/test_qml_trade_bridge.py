@@ -333,6 +333,101 @@ class QmlTradeBridgeTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(bridge.state["controls"]["summary"], "持仓 0 笔 · 挂单 0 笔")
 
+    def finish_control_read(self, bridge):
+        for _ in range(100):
+            job = bridge._jobs.get("controls")
+            if job:
+                job.thread.join(0.01)
+            bridge._consume_results()
+            if "controls" not in bridge._jobs:
+                return
+        self.fail("控制目标读取未完成")
+
+    def test_control_poll_refreshes_profit_and_books_at_independent_intervals(self):
+        bridge, api = self.make_bridge()
+        # Exercise the real timer dispatcher (make_bridge isolates writes by default).
+        bridge.poll = module.QmlBridge.poll.__get__(bridge)
+        bridge._set_state(page="controls", refreshIntervals={"quote": 1, "positions": 7, "orders": 10})
+        api.active_positions = (SimpleNamespace(ticket=123, symbol="XAUUSDc",
+            type=mt5.POSITION_TYPE_BUY, volume=0.01, price_open=4190,
+            sl=4180, tp=4220, profit=10),)
+        with patch.object(api, "positions_get", wraps=api.positions_get) as positions, \
+                patch.object(api, "orders_get", wraps=api.orders_get) as orders, \
+                patch.object(bridge, "_quote"), \
+                patch.object(module.time, "monotonic", return_value=100) as clock:
+            bridge._refresh_controls("symbol", force=True)
+            self.finish_control_read(bridge)
+            self.assertEqual(bridge.state["controls"]["positions"][0]["profit"], "10")
+            api.active_positions[0].profit = 25.5
+            clock.return_value = 106
+            bridge.poll()
+            self.assertEqual(positions.call_count, 1)
+            clock.return_value = 107
+            bridge.poll()
+            # Refresh keeps the last complete snapshot while the worker reads.
+            self.assertEqual(bridge.state["controls"]["positions"][0]["ticket"], "123")
+            self.finish_control_read(bridge)
+            self.assertEqual(bridge.state["controls"]["positions"][0]["profit"], "25.5")
+            self.assertEqual(positions.call_count, 2)
+            self.assertEqual(orders.call_count, 1)
+            clock.return_value = 110
+            bridge.poll()
+            self.finish_control_read(bridge)
+            self.assertEqual(positions.call_count, 2)
+            self.assertEqual(orders.call_count, 2)
+            self.assertEqual(bridge.state["controls"]["positions"][0]["profit"], "25.5")
+            # A changed interval takes effect without reopening the page.
+            bridge._set_state(refreshIntervals={"quote": 1, "positions": 1, "orders": 10})
+            api.active_positions[0].profit = -40
+            clock.return_value = 111
+            bridge.poll()
+            self.finish_control_read(bridge)
+            self.assertEqual(bridge.state["controls"]["positions"][0]["profit"], "-40")
+            self.assertEqual(positions.call_count, 3)
+            self.assertEqual(orders.call_count, 2)
+            self.assertTrue(all(call.kwargs == {"symbol": "XAUUSDc"} for call in positions.call_args_list))
+            self.assertEqual(api.sent, [])
+
+    def test_automatic_control_read_keeps_snapshot_and_discards_switched_account(self):
+        bridge, api = self.make_bridge()
+        bridge.poll = module.QmlBridge.poll.__get__(bridge)
+        api.active_positions = (SimpleNamespace(ticket=123, symbol="XAUUSDc",
+            type=mt5.POSITION_TYPE_BUY, volume=0.01, price_open=4190,
+            sl=4180, tp=4220, profit=10),)
+        with patch.object(module.time, "monotonic", return_value=100):
+            bridge._refresh_controls("account", force=True)
+        self.finish_control_read(bridge)
+        snapshot = bridge.state["controls"]["positions"]
+        started, release = Event(), Event()
+
+        def slow_positions(**kwargs):
+            self.assertEqual(kwargs, {})  # Entire-account scope persists on timer refresh.
+            started.set()
+            release.wait(2)
+            return api.active_positions
+
+        try:
+            with patch.object(api, "positions_get", side_effect=slow_positions) as reads, \
+                    patch.object(bridge, "_quote"), \
+                    patch.object(module.time, "monotonic", return_value=110):
+                bridge._set_state(page="controls", refreshIntervals={"quote": 1, "positions": 5, "orders": 30})
+                bridge.poll()
+                self.assertTrue(started.wait(1))
+                self.assertEqual(bridge.state["controls"]["positions"], snapshot)
+                for _ in range(3):
+                    bridge.poll()
+                self.assertEqual(reads.call_count, 1)
+                self.assertNotIn("controls", bridge._pending_jobs)
+                api.current = _account(202)
+                bridge.poll()
+                self.assertFalse(bridge.connected)
+                self.assertFalse(bridge.state["controls"].get("positions"))
+        finally:
+            release.set()
+        self.finish_control_read(bridge)
+        self.assertFalse(bridge.state["controls"].get("positions"))
+        self.assertEqual(api.sent, [])
+
     def test_multi_position_protection_runs_off_gui_thread_and_reports_completion(self):
         bridge, api = self.make_bridge()
         api.active_positions = tuple(SimpleNamespace(ticket=ticket, symbol="XAUUSDc",

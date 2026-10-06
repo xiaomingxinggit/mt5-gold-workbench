@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from queue import Empty, Queue
@@ -333,29 +334,57 @@ class QmlTradingBridge(QmlBridge):
             "confirmText": "确认发送", "danger": True,
         })
 
-    def _refresh_controls(self, scope: str, *, force: bool = False) -> None:
+    def _poll_controls(self, now: float, *, force: bool = False) -> None:
+        intervals = self.state["refreshIntervals"]
+        positions_due = force or now - self._last_requested.get("control_positions", 0) >= intervals["positions"]
+        orders_due = force or now - self._last_requested.get("control_orders", 0) >= intervals["orders"]
+        if positions_due or orders_due:
+            try:
+                self._refresh_controls(self._control_scope, force=force,
+                                       include_positions=positions_due,
+                                       include_orders=orders_due)
+            except (RuntimeError, ValueError, OSError) as exc:
+                self._set_status(f"控制目标读取失败：{exc}")
+
+    def _refresh_controls(self, scope: str, *, force: bool = False,
+                          include_positions: bool = True,
+                          include_orders: bool = True) -> None:
         if self._protection_busy():
+            return
+        if not include_positions and not include_orders:
+            return
+        # A slow read finishes before the next automatic snapshot is requested.
+        # Manual refresh/scope changes retain the existing queued-job semantics.
+        if not force and "controls" in self._jobs:
             return
         account = self._require_account()
         if scope not in {"symbol", "account"}:
             raise ValueError("操作范围无效")
         self._control_scope = scope
         account_label = f"账户 {account.login} · {account.server} · {account.currency}"
-        self._set_state(controls={
+        previous = self.state["controls"]
+        same_scope = previous.get("accountLabel") == account_label and previous.get("scope") == scope
+        positions = previous.get("positions", []) if same_scope else []
+        orders = previous.get("orders", []) if same_scope else []
+        # A different account or operation scope must always load both books.
+        if not same_scope:
+            include_positions = include_orders = True
+        snapshot = {
             "accountLabel": account_label, "scope": scope,
-            "summary": "正在读取持仓与挂单…", "status": self._control_result or "正在读取目标…",
-            "positions": [], "orders": [], "canClose": False, "canRemove": False,
+            "summary": previous.get("summary", "正在读取持仓与挂单…") if same_scope else "正在读取持仓与挂单…",
+            "status": self._control_result or (previous.get("status", "正在读取目标…") if same_scope else "正在读取目标…"),
+            "positions": positions, "orders": orders,
+            "canClose": bool(positions), "canRemove": bool(orders),
             "loading": True, "busy": False,
-        })
+        }
+        self._set_state(controls=snapshot)
 
         def load(api) -> dict:
-            active = load_targets("close", scope, self.symbol_name, api=api)
-            pending = load_targets("remove", scope, self.symbol_name, api=api)
-            return {
-                "accountLabel": account_label, "scope": scope,
-                "summary": f"持仓 {len(active)} 笔 · 挂单 {len(pending)} 笔",
-                "status": self._control_result or "目标已更新", "loading": False, "busy": False,
-                "positions": [
+            result = {**snapshot, "loading": False,
+                      "status": self._control_result or "目标已更新"}
+            if include_positions:
+                active = load_targets("close", scope, self.symbol_name, api=api)
+                result["positions"] = [
                     {"ticket": str(row.ticket), "symbol": row.symbol,
                      "side": "BUY" if row.type == mt5.POSITION_TYPE_BUY else "SELL",
                      "volume": str(row.volume), "openPrice": str(row.price_open),
@@ -363,17 +392,25 @@ class QmlTradingBridge(QmlBridge):
                      "sl": str(getattr(row, "sl", 0) or "—"),
                      "tp": str(getattr(row, "tp", 0) or "—")}
                     for row in active
-                ],
-                "orders": [
+                ]
+            if include_orders:
+                pending = load_targets("remove", scope, self.symbol_name, api=api)
+                result["orders"] = [
                     {"ticket": str(row.ticket), "symbol": row.symbol,
                      "type": str(row.type), "volume": str(row.volume_initial),
                      "price": str(row.price_open), "stop": str(row.sl or "—")}
                     for row in pending
-                ],
-                "canClose": bool(active), "canRemove": bool(pending),
-            }
+                ]
+            result.update(summary=f"持仓 {len(result['positions'])} 笔 · 挂单 {len(result['orders'])} 笔",
+                          canClose=bool(result["positions"]), canRemove=bool(result["orders"]))
+            return result
 
         self._request_job("controls", (self._identity(), scope), load, force=force)
+        requested_at = time.monotonic()
+        if include_positions:
+            self._last_requested["control_positions"] = requested_at
+        if include_orders:
+            self._last_requested["control_orders"] = requested_at
 
     def _preview_control(self, payload: dict) -> None:
         account = self._require_account()
