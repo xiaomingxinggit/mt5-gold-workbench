@@ -24,6 +24,7 @@ MAX_QUOTE_AGE_SECONDS = 15
 ORDER_MODE_SL = 16
 ORDER_MODE_TP = 32
 MAX_PROFIT_SEARCH_STEPS = 48
+PROTECTION_REQUEST_INTERVAL_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -289,6 +290,25 @@ def load_targets(scope: str, symbol_name: str, *, api=mt5) -> tuple:
     return rows
 
 
+def select_targets(rows, tickets=None) -> tuple:
+    """Resolve an explicit selection; closed/missing tickets never become all."""
+    rows = tuple(rows)
+    if tickets is None:
+        return rows
+    if not isinstance(tickets, (list, tuple)) or not tickets:
+        raise ValueError("请至少勾选一笔持仓")
+    try:
+        requested = tuple(int(str(ticket)) for ticket in tickets)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("持仓选择无效") from exc
+    if any(ticket <= 0 for ticket in requested) or len(set(requested)) != len(requested):
+        raise ValueError("持仓选择无效或重复")
+    selected = tuple(row for row in rows if row.ticket in requested)
+    if {row.ticket for row in selected} != set(requested):
+        raise RuntimeError("勾选持仓已关闭或不在当前范围，请刷新后重新选择")
+    return selected
+
+
 def prepare_protection(kind: str, positions, *, amount_usd=None, sl=None,
                        tp=None, api=mt5) -> tuple[ProtectionPlan, ...]:
     """Build preview-only plans. No order_check or order_send is called."""
@@ -362,15 +382,25 @@ def _write_record(path: Path, record: dict) -> None:
 def execute_protection_batch(kind: str, scope: str, symbol_name: str,
                              expected_account, preview_rows, preview_plans,
                              record_dir: Path, *, amount_usd=None, sl=None,
-                             tp=None, api=mt5) -> tuple[dict, ...]:
+                             tp=None, selected_tickets=None, cancelled=None,
+                             progress=None, request_interval_seconds=PROTECTION_REQUEST_INTERVAL_SECONDS,
+                             wait_fn=time.sleep, api=mt5) -> tuple[dict, ...]:
     """Execute one confirmed preview, stop at first failure, never retry."""
     canonical_kind, _, _, _ = _inputs(kind, amount_usd, sl, tp)
     preview_rows = tuple(preview_rows)
     preview_plans = tuple(preview_plans)
     if not preview_rows or not preview_plans:
         raise ValueError("没有可修改的持仓")
+    if not math.isfinite(request_interval_seconds) or request_interval_seconds < 0:
+        raise ValueError("发送间隔无效")
+
+    def check_cancelled():
+        if cancelled is not None and cancelled.is_set():
+            raise RuntimeError("批量修改已停止；已发送的修改请在 MT5 核对")
+
+    check_cancelled()
     _account(expected_account, api=api)
-    current_rows = load_targets(scope, symbol_name, api=api)
+    current_rows = select_targets(load_targets(scope, symbol_name, api=api), selected_tickets)
     snapshot = target_signature(preview_rows)
     if target_signature(current_rows) != snapshot:
         raise RuntimeError("持仓或止盈止损价已变化，请重新预览")
@@ -380,6 +410,7 @@ def execute_protection_batch(kind: str, scope: str, symbol_name: str,
         raise RuntimeError("保护价或报价已变化，请重新预览")
     if not fresh_plans:
         raise ValueError("没有可修改的持仓")
+    check_cancelled()
 
     record_dir = Path(record_dir)
     record_dir.mkdir(parents=True, exist_ok=True)
@@ -401,6 +432,12 @@ def execute_protection_batch(kind: str, scope: str, symbol_name: str,
     original_by_ticket = {row.ticket: row for row in preview_rows}
     for index, preview_plan in enumerate(fresh_plans, 1):
         try:
+            if index > 1 and request_interval_seconds:
+                if cancelled is not None:
+                    cancelled.wait(request_interval_seconds)
+                else:
+                    wait_fn(request_interval_seconds)
+            check_cancelled()
             _account(expected_account, api=api)
             live_rows = load_targets(scope, symbol_name, api=api)
             live = next((row for row in live_rows if row.ticket == preview_plan.ticket), None)
@@ -424,11 +461,13 @@ def execute_protection_batch(kind: str, scope: str, symbol_name: str,
             last = next((row for row in last_rows if row.ticket == preview_plan.ticket), None)
             if last is None or target_signature((last,)) != target_signature((original,)):
                 raise RuntimeError(f"第 {index} 笔持仓或止盈止损价已变化，请核对 MT5")
+            check_cancelled()
         except Exception as exc:
             record["status"] = "stopped_check"
             record["results"].append({"ticket": preview_plan.ticket, "error": str(exc)})
             _write_record(record_path, record)
-            raise
+            error_type = ValueError if isinstance(exc, ValueError) else RuntimeError
+            raise error_type(f"已完成 {index - 1}/{len(fresh_plans)} 笔；{exc}") from exc
         try:
             result = api.order_send(dict(request))
         except Exception as exc:
@@ -444,9 +483,15 @@ def execute_protection_batch(kind: str, scope: str, symbol_name: str,
                "comment": getattr(result, "comment", "无返回结果")}
         record["results"].append(row)
         if result is None or getattr(result, "retcode", None) != mt5.TRADE_RETCODE_DONE:
-            record["status"] = "stopped_uncertain"
+            limited = result is not None and result.retcode == mt5.TRADE_RETCODE_TOO_MANY_REQUESTS
+            record["status"] = "stopped_rate_limit" if limited else "stopped_uncertain"
             _write_record(record_path, record)
+            if limited:
+                raise RuntimeError(f"已完成 {index - 1}/{len(fresh_plans)} 笔；服务器限制请求频率（10024）。"
+                                   f"持仓 {preview_plan.ticket} 修改被拒绝，后续已停止；稍后刷新并重新预览未完成的持仓。")
             raise RuntimeError(f"第 {index} 笔发送失败或状态不确定：{row}；已停止，先核对 MT5")
         record["status"] = "partial" if index < len(fresh_plans) else "done"
         _write_record(record_path, record)
+        if progress is not None:
+            progress(index, len(fresh_plans), preview_plan.ticket)
     return tuple(record["results"])

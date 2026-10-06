@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import MetaTrader5 as mt5
 
 from mt5_workbench.services.position_protection import (
-    execute_protection_batch, load_targets, prepare_protection, target_signature,
+    execute_protection_batch, load_targets, prepare_protection, select_targets, target_signature,
 )
 
 
@@ -185,6 +185,77 @@ class ProtectionTests(unittest.TestCase):
             record = json.loads(next(Path(directory).glob("*.json")).read_text(encoding="utf-8"))
             self.assertEqual(record["status"], "done")
             self.assertEqual(record["results"][0]["ticket"], 11)
+
+    def test_three_position_batch_is_paced_and_all_positions_are_modified(self):
+        self.api.positions += [position(12), position(13)]
+        rows = self._rows()
+        plans = prepare_protection("batch", rows, tp=Decimal("4210"), api=self.api)
+        clock = [0.0]
+        sent_at = []
+        waits = []
+        progress = []
+        original_send = self.api.order_send
+
+        def rate_limited_send(request):
+            if sent_at and clock[0] - sent_at[-1] < 2.0:
+                return SimpleNamespace(retcode=10024, comment="Too many trade requests")
+            sent_at.append(clock[0])
+            return original_send(request)
+
+        def advance(seconds):
+            waits.append(seconds)
+            clock[0] += seconds
+
+        self.api.order_send = rate_limited_send
+        with TemporaryDirectory() as directory:
+            result = execute_protection_batch(
+                "batch", "symbol", "XAUUSDc", self.api.account, rows, plans,
+                Path(directory), tp=Decimal("4210"), api=self.api, wait_fn=advance,
+                progress=lambda done, total, ticket: progress.append((done, total, ticket)),
+            )
+            self.assertEqual([row["ticket"] for row in result], [11, 12, 13])
+            self.assertEqual(waits, [2.0, 2.0])
+            self.assertEqual([row.tp for row in self.api.positions], [4210.0] * 3)
+            self.assertEqual(progress, [(1, 3, 11), (2, 3, 12), (3, 3, 13)])
+
+    def test_rate_limit_reports_partial_completion_without_retry(self):
+        self.api.positions += [position(12), position(13)]
+        rows = self._rows()
+        plans = prepare_protection("batch", rows, tp=Decimal("4210"), api=self.api)
+        original_send = self.api.order_send
+
+        def reject_second(request):
+            if self.api.sent:
+                self.api.send_retcode = 10024
+            return original_send(request)
+
+        self.api.order_send = reject_second
+        with TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "已完成 1/3.*10024"):
+                execute_protection_batch("batch", "symbol", "XAUUSDc", self.api.account,
+                    rows, plans, Path(directory), tp=Decimal("4210"), api=self.api, wait_fn=lambda _s: None)
+            self.assertEqual([row["position"] for row in self.api.sent], [11, 12])
+            record = json.loads(next(Path(directory).glob("*.json")).read_text(encoding="utf-8"))
+            self.assertEqual(record["status"], "stopped_rate_limit")
+            self.assertEqual([row.tp for row in self.api.positions], [4210.0, 0.0, 0.0])
+
+    def test_explicit_selection_ignores_other_positions_but_rechecks_selected(self):
+        self.api.positions += [position(12), position(13)]
+        rows = select_targets(self._rows(), ["12", "13"])
+        plans = prepare_protection("batch", rows, tp=Decimal("4210"), api=self.api)
+        self.api.positions[0].sl = 4190.0
+        with TemporaryDirectory() as directory:
+            result = execute_protection_batch("batch", "symbol", "XAUUSDc", self.api.account,
+                rows, plans, Path(directory), tp=Decimal("4210"), selected_tickets=["12", "13"],
+                api=self.api, wait_fn=lambda _s: None)
+            self.assertEqual([row["ticket"] for row in result], [12, 13])
+            self.assertEqual(self.api.positions[0].tp, 0.0)
+        with self.assertRaisesRegex(ValueError, "至少勾选"):
+            select_targets(self._rows(), [])
+        with self.assertRaisesRegex(RuntimeError, "已关闭"):
+            select_targets(self._rows(), ["999"])
+        with self.assertRaisesRegex(ValueError, "重复"):
+            select_targets(self._rows(), ["12", "12"])
 
     def test_changed_target_or_quote_blocks_before_send(self):
         rows = self._rows()

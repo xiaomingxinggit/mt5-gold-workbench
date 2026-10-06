@@ -333,6 +333,97 @@ class QmlTradeBridgeTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(bridge.state["controls"]["summary"], "持仓 0 笔 · 挂单 0 笔")
 
+    def test_multi_position_protection_runs_off_gui_thread_and_reports_completion(self):
+        bridge, api = self.make_bridge()
+        api.active_positions = tuple(SimpleNamespace(ticket=ticket, symbol="XAUUSDc",
+            type=mt5.POSITION_TYPE_BUY, volume=0.01, price_open=4000.0, sl=0.0, tp=0.0)
+            for ticket in (123, 124, 125))
+        sent_first = Event()
+        release = Event()
+
+        def update_stops(request):
+            api.sent.append(dict(request))
+            row = next(row for row in api.active_positions if row.ticket == request["position"])
+            row.sl, row.tp = request["sl"], request["tp"]
+            if len(api.sent) == 1:
+                sent_first.set()
+                release.wait(3)
+            return SimpleNamespace(retcode=mt5.TRADE_RETCODE_DONE, order=0, deal=0, comment="done")
+
+        api.order_send = update_stops
+        bridge.perform("previewBatchStops", {"scope": "symbol", "sl": "4050", "tp": "4250",
+                                            "tickets": ["123", "124", "125"]})
+        token = bridge.state["confirmation"]["token"]
+        with tempfile.TemporaryDirectory() as temp, patch.object(module, "_records_dir", return_value=Path(temp)), \
+                patch.object(module, "PROTECTION_REQUEST_INTERVAL_SECONDS", 0.01), \
+                patch.object(bridge, "_refresh_controls"):
+            start = time.monotonic()
+            bridge.perform("confirm", {"token": token})
+            self.assertLess(time.monotonic() - start, 0.25)
+            self.assertTrue(sent_first.wait(1))
+            self.assertTrue(bridge.state["controls"]["busy"])
+            bridge.perform("previewBatchStops", {"scope": "symbol", "sl": "4060", "tp": "4260"})
+            self.assertEqual(bridge.state["confirmation"], {})
+            release.set()
+            bridge._protection_thread.join(2)
+            bridge._consume_protection()
+            self.assertFalse(bridge.state["controls"]["busy"])
+            self.assertEqual([row["position"] for row in api.sent], [123, 124, 125])
+            self.assertIn("已修改 3 笔", bridge.state["status"])
+
+    def test_protection_selection_and_confirmation_checkboxes_only_modify_checked_ticket(self):
+        bridge, api = self.make_bridge()
+        api.active_positions = tuple(SimpleNamespace(ticket=ticket, symbol="XAUUSDc",
+            type=mt5.POSITION_TYPE_BUY, volume=0.01, price_open=4000.0, sl=0.0, tp=0.0)
+            for ticket in (123, 124, 125))
+        api.order_send = lambda request: (api.sent.append(dict(request)) or
+            SimpleNamespace(retcode=mt5.TRADE_RETCODE_DONE, order=0, deal=0, comment="done"))
+        bridge.perform("previewBatchStops", {"scope": "symbol", "sl": "4050", "tp": "4250",
+                                            "tickets": []})
+        self.assertEqual(bridge.state["confirmation"], {})
+        bridge.perform("previewBatchStops", {"scope": "symbol", "sl": "4050", "tp": "4250",
+                                            "tickets": ["124", "125"]})
+        token = bridge.state["confirmation"]["token"]
+        self.assertEqual([row[0] for row in bridge.state["confirmation"]["rows"]], ["124", "125"])
+        bridge.perform("protectionToggleTicket", {"ticket": "124", "checked": False})
+        self.assertEqual(bridge.state["confirmation"]["selectedTickets"], ["125"])
+        self.assertEqual(api.sent, [])
+        with tempfile.TemporaryDirectory() as temp, patch.object(module, "_records_dir", return_value=Path(temp)), \
+                patch.object(bridge, "_refresh_controls"):
+            bridge.perform("confirm", {"token": token})
+            self.assertEqual([row["position"] for row in api.sent], [125])
+
+    def test_account_switch_cancels_remaining_background_modifications(self):
+        bridge, api = self.make_bridge()
+        api.active_positions = tuple(SimpleNamespace(ticket=ticket, symbol="XAUUSDc",
+            type=mt5.POSITION_TYPE_BUY, volume=0.01, price_open=4000.0, sl=0.0, tp=0.0)
+            for ticket in (123, 124))
+        first = Event()
+        release = Event()
+
+        def send(request):
+            api.sent.append(dict(request))
+            first.set()
+            release.wait(2)
+            return SimpleNamespace(retcode=mt5.TRADE_RETCODE_DONE, order=0, deal=0, comment="done")
+
+        api.order_send = send
+        bridge.perform("previewBatchStops", {"scope": "symbol", "sl": "4050", "tp": "4250"})
+        token = bridge.state["confirmation"]["token"]
+        with tempfile.TemporaryDirectory() as temp, patch.object(module, "_records_dir", return_value=Path(temp)):
+            try:
+                bridge.perform("confirm", {"token": token})
+                self.assertTrue(first.wait(1))
+                api.current = _account(202)
+                self.assertFalse(bridge.check_account_access())
+            finally:
+                release.set()
+            bridge._protection_thread.join(2)
+            bridge._consume_protection()
+            self.assertEqual([row["position"] for row in api.sent], [123])
+            self.assertFalse(bridge.state["connection"]["connected"])
+            self.assertFalse(bridge._protection_busy())
+
     def test_control_read_error_replaces_loading_status(self):
         bridge, api = self.make_bridge()
         api.positions_get = lambda **_kwargs: None

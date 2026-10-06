@@ -10,14 +10,25 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3")
 
-from PySide6.QtCore import QPointF, QUrl, QMetaObject, Q_ARG
+from PySide6.QtCore import QPointF, QUrl, QMetaObject, Q_ARG, Qt
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
 
 from mt5_workbench.ui.qml_bridge import PAGE_NAMES
 from mt5_workbench.ui.qml_trade_bridge import QmlTradingBridge
+
+
+def visual_find(item, name):
+    if item.objectName() == name:
+        return item
+    for child in item.childItems():
+        found = visual_find(child, name)
+        if found is not None:
+            return found
+    return None
 
 
 class QmlUiTests(unittest.TestCase):
@@ -157,6 +168,27 @@ class QmlUiTests(unittest.TestCase):
                     self.assertAlmostEqual(be_pos.y(), batch_pos.y(), delta=2)
                     self.assertGreater(batch_pos.x(), be_pos.x())
             self.assertFalse(window.grabWindow().isNull())
+            bridge._set_state(controls={"accountLabel": "账户 101 · fake · USC", "loading": False,
+                "positions": [{"ticket": str(ticket), "symbol": "XAUUSDc", "side": "BUY",
+                    "volume": "0.01", "openPrice": "4000", "sl": "—", "tp": "4250", "profit": "0"}
+                    for ticket in (123, 124)], "orders": []})
+            self.app.processEvents()
+            control_view = window.findChild(QQuickItem, "controlView")
+            first_check = visual_find(window.contentItem(), "controlPositionCheck_123")
+            self.assertEqual(first_check.parentItem().parentItem().property("color").name(), "#172438")
+            select_all = window.findChild(QQuickItem, "controlSelectAllPositions")
+            self.assertEqual(control_view.property("selectedTickets").toVariant(), ["123", "124"])
+            for item, expected in ((first_check, ["124"]), (select_all, ["123", "124"]), (select_all, [])):
+                point = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
+                QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
+                self.app.processEvents()
+                self.assertEqual(control_view.property("selectedTickets").toVariant(), expected)
+            bridge._set_state(confirmation={"token": "preview-only", "selectable": True,
+                "selectedTickets": ["123", "124"], "columns": ["Ticket", "品种", "止盈"],
+                "rows": [["123", "XAUUSDc BUY", "4250"], ["124", "XAUUSDc BUY", "4250"]]})
+            self.app.processEvents()
+            self.assertIsNotNone(visual_find(window.contentItem(), "protectionConfirmCheck_123"))
+            bridge._set_state(confirmation={})
             window.close()
         finally:
             bridge.close()

@@ -11,10 +11,13 @@ import sqlite3
 import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Event, Thread
 from uuid import uuid4
 
 import MetaTrader5 as mt5
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QTimer
 
 from mt5_workbench.domain.account_policy import is_usc_account
 from mt5_workbench.domain.position_optimizer import Optimization, money, optimize
@@ -24,7 +27,8 @@ from mt5_workbench.services.account_controls import (
 from mt5_workbench.services.journal_positions import load_open_positions
 from mt5_workbench.services.basic_limit_order import basic_fields, build_basic_request
 from mt5_workbench.services.position_protection import (
-    execute_protection_batch, prepare_protection,
+    PROTECTION_REQUEST_INTERVAL_SECONDS, execute_protection_batch, prepare_protection,
+    select_targets,
 )
 from mt5_workbench.services.trade_execution import (
     build_requests, check_requests, existing_duplicates, send_checked,
@@ -54,10 +58,21 @@ class QmlTradingBridge(QmlBridge):
         self._suggested_types: tuple[str, ...] = ()
         self._confirmation: dict | None = None
         self._control_scope = "symbol"
+        self._control_result = ""
+        self._protection_thread = None
+        self._protection_cancel = Event()
+        self._protection_events = Queue()
+        self._protection_reconnect = False
+        self._shutdown_after_protection = False
         super().__init__(*args, **kwargs)
+        self._protection_timer = QTimer(self)
+        self._protection_timer.setInterval(80)
+        self._protection_timer.timeout.connect(self._consume_protection)
 
     def _clear_session(self, message: str, *, locked: bool = False,
                        current_account=None) -> None:
+        self._protection_cancel.set()
+        self._control_result = ""
         self._plan = None
         self._plan_fields = None
         self._plan_account = None
@@ -66,6 +81,12 @@ class QmlTradingBridge(QmlBridge):
         super()._clear_session(message, locked=locked, current_account=current_account)
 
     def connect(self) -> None:
+        if self._protection_busy():
+            self._protection_cancel.set()
+            self._protection_reconnect = True
+            self._set_status("正在停止批量修改，然后重新连接…")
+            return
+        self._control_result = ""
         self._plan = None
         self._plan_fields = None
         self._plan_account = None
@@ -313,6 +334,8 @@ class QmlTradingBridge(QmlBridge):
         })
 
     def _refresh_controls(self, scope: str, *, force: bool = False) -> None:
+        if self._protection_busy():
+            return
         account = self._require_account()
         if scope not in {"symbol", "account"}:
             raise ValueError("操作范围无效")
@@ -320,9 +343,9 @@ class QmlTradingBridge(QmlBridge):
         account_label = f"账户 {account.login} · {account.server} · {account.currency}"
         self._set_state(controls={
             "accountLabel": account_label, "scope": scope,
-            "summary": "正在读取持仓与挂单…", "status": "正在读取目标…",
+            "summary": "正在读取持仓与挂单…", "status": self._control_result or "正在读取目标…",
             "positions": [], "orders": [], "canClose": False, "canRemove": False,
-            "loading": True,
+            "loading": True, "busy": False,
         })
 
         def load(api) -> dict:
@@ -331,12 +354,14 @@ class QmlTradingBridge(QmlBridge):
             return {
                 "accountLabel": account_label, "scope": scope,
                 "summary": f"持仓 {len(active)} 笔 · 挂单 {len(pending)} 笔",
-                "status": "目标已更新", "loading": False,
+                "status": self._control_result or "目标已更新", "loading": False, "busy": False,
                 "positions": [
                     {"ticket": str(row.ticket), "symbol": row.symbol,
                      "side": "BUY" if row.type == mt5.POSITION_TYPE_BUY else "SELL",
                      "volume": str(row.volume), "openPrice": str(row.price_open),
-                     "profit": str(getattr(row, "profit", "—"))}
+                     "profit": str(getattr(row, "profit", "—")),
+                     "sl": str(getattr(row, "sl", 0) or "—"),
+                     "tp": str(getattr(row, "tp", 0) or "—")}
                     for row in active
                 ],
                 "orders": [
@@ -396,12 +421,14 @@ class QmlTradingBridge(QmlBridge):
 
     def _preview_protection(self, action: str, payload: dict) -> None:
         """Show the exact position SL/TP changes before any trading request."""
+        self._control_result = ""
         self._clear_confirmation()
         account = self._require_account()
         scope = str(payload.get("scope", self._control_scope))
         if scope not in {"symbol", "account"} or scope != self._control_scope:
             raise ValueError("操作范围已变化，请刷新目标后重试")
-        rows = load_targets("close", scope, self.symbol_name, api=self._api)
+        tickets = payload.get("tickets")
+        rows = select_targets(load_targets("close", scope, self.symbol_name, api=self._api), tickets)
         if not rows:
             raise ValueError("所选范围内没有持仓")
         kind = "breakeven" if action == "previewBreakEven" else "batch"
@@ -426,6 +453,7 @@ class QmlTradingBridge(QmlBridge):
         self._confirmation = {
             "kind": "protection", "token": token, "operation": kind,
             "scope": scope, "rows": rows, "plans": plans,
+            "tickets": tuple(str(row.ticket) for row in rows) if tickets is not None else None,
             "amount_usd": amount_usd, "sl": sl, "tp": tp,
             "account": (account.login, account.server),
         }
@@ -455,17 +483,41 @@ class QmlTradingBridge(QmlBridge):
             parameter = f"统一止损 {sl if sl is not None else '保持原值'} · 止盈 {tp if tp is not None else '保持原值'}"
             warning = ("统一价格可能改变现有风险；留空的一侧保持原值。"
                        "确认时会重新核对持仓与报价。")
+        details = (f"账户 {account.login} · {account.server} · {account.currency}\n"
+                   f"范围 {self.symbol_name if scope == 'symbol' else '整个账户'} · 预览 {len(rows)} 笔" +
+                   (f" · 已满足目标 {skipped} 笔（无需修改）" if skipped else "") + f"\n{parameter}")
+        self._confirmation["detailsBase"] = details
         self._set_state(confirmation={
-            "token": token, "title": f"确认{title}", "heading": "请逐笔核对修改前后的价格",
-            "details": (f"账户 {account.login} · {account.server} · {account.currency}\n"
-                        f"范围 {self.symbol_name if scope == 'symbol' else '整个账户'} · "
-                        f"修改 {len(plans)} 笔" +
-                        (f" · 跳过 {skipped} 笔" if skipped else "") +
-                        f"\n{parameter}"),
-            "warning": warning + "任一笔失败即停止后续操作，不自动重试。",
+            "token": token, "title": f"确认{title}", "heading": "勾选需要修改的持仓，并核对修改前后的价格",
+            "details": details + f"\n本次勾选 {len(plans)} 笔待修改持仓",
+            "warning": warning + "逐笔间隔 2 秒发送；任一笔失败即停止后续操作，不自动重试。",
             "columns": columns, "rows": display_rows,
+            "selectable": True, "selectedTickets": [str(plan.ticket) for plan in plans],
             "confirmText": "确认修改止盈止损", "danger": kind == "batch",
         })
+        self._confirmation["enabledTickets"] = tuple(str(plan.ticket) for plan in plans)
+
+    def _toggle_protection_ticket(self, payload: dict) -> None:
+        preview = self._confirmation
+        if preview is None or preview["kind"] != "protection":
+            raise RuntimeError("确认信息已失效，请重新预览")
+        self._require_account()
+        ticket = str(payload.get("ticket", ""))
+        if ticket not in {str(plan.ticket) for plan in preview["plans"]}:
+            raise ValueError("持仓不在当前预览中")
+        enabled = set(preview["enabledTickets"])
+        if payload.get("checked") is True:
+            enabled.add(ticket)
+        elif payload.get("checked") is False:
+            enabled.discard(ticket)
+        else:
+            raise ValueError("持仓选择无效")
+        preview["enabledTickets"] = tuple(str(plan.ticket) for plan in preview["plans"]
+                                         if str(plan.ticket) in enabled)
+        confirmation = dict(self.state["confirmation"])
+        confirmation["selectedTickets"] = list(preview["enabledTickets"])
+        confirmation["details"] = preview["detailsBase"] + f"\n本次勾选 {len(enabled)} 笔待修改持仓"
+        self._set_state(confirmation=confirmation)
 
     def _publish_journal(self, payload: dict) -> None:
         account = self._require_account()
@@ -543,6 +595,86 @@ class QmlTradingBridge(QmlBridge):
             self._set_status(f"回复已保存，列表刷新失败：{exc}")
         self.refresh_journal(force=True)
 
+    def _protection_busy(self) -> bool:
+        return self._protection_thread is not None
+
+    def _execute_protection(self, preview, account, *, cancelled=None, progress=None):
+        return execute_protection_batch(
+            preview["operation"], preview["scope"], self.symbol_name,
+            account, preview["rows"], preview["plans"], _records_dir("controls"),
+            amount_usd=preview["amount_usd"], sl=preview["sl"], tp=preview["tp"],
+            selected_tickets=preview.get("tickets"), cancelled=cancelled, progress=progress,
+            request_interval_seconds=PROTECTION_REQUEST_INTERVAL_SECONDS, api=self._api,
+        )
+
+    def _start_protection(self, preview, account) -> None:
+        """Pace confirmed multi-position writes off the GUI thread."""
+        identity = (account.login, account.server)
+        self._protection_cancel = Event()
+        cancelled = self._protection_cancel
+        self._control_result = ""
+        self._generations["controls"] = self._generations.get("controls", 0) + 1
+        if "controls" in self._jobs:
+            self._jobs["controls"].cancelled.set()
+        self._pending_jobs.pop("controls", None)
+        self._set_state(controls={**self.state["controls"], "busy": True,
+                                 "loading": False, "status": f"正在修改 0/{len(preview['plans'])} 笔…"})
+
+        def progress(done, total, ticket):
+            self._protection_events.put(("progress", identity,
+                                        f"已修改 {done}/{total} 笔 · #{ticket}；逐笔间隔 2 秒"))
+
+        def run():
+            try:
+                done = self._execute_protection(preview, account, cancelled=cancelled, progress=progress)
+                message = f"止盈止损已修改 {len(done)} 笔；请在 MT5 核对实际状态"
+            except Exception as exc:
+                message = f"批量修改未全部完成：{exc}"
+            finally:
+                if self._shutdown_after_protection:
+                    self._api.shutdown()
+            self._protection_events.put(("done", identity, message))
+
+        self._protection_thread = Thread(target=run, name="mt5-protection-writes", daemon=True)
+        try:
+            self._protection_thread.start()
+        except RuntimeError:
+            self._protection_thread = None
+            self._set_state(controls={**self.state["controls"], "busy": False})
+            raise
+        self._protection_timer.start()
+
+    def _consume_protection(self) -> None:
+        while True:
+            try:
+                kind, identity, message = self._protection_events.get_nowait()
+            except Empty:
+                break
+            if kind == "done":
+                if self._protection_thread is not None and self._protection_thread.is_alive():
+                    self._protection_events.put((kind, identity, message))
+                    break
+                self._protection_thread = None
+                self._protection_timer.stop()
+            if not self._closing and self.connected and identity == self._identity():
+                self._set_state(status=message, controls={**self.state["controls"],
+                                                         "busy": kind != "done", "status": message})
+                if kind == "done" and self.check_account_access():
+                    self._control_result = message
+                    self._refresh_controls(self._control_scope, force=True)
+            if kind == "done" and self._protection_reconnect and not self._closing:
+                self._protection_reconnect = False
+                self.connect()
+
+    def shutdown(self) -> None:
+        self._protection_cancel.set()
+        self._protection_timer.stop()
+        if self._protection_thread is not None and self._protection_thread.is_alive() and self.initialized:
+            # Let the worker finish its in-flight request before shutting down MT5.
+            self._shutdown_after_protection = True
+            self.initialized = False
+        super().shutdown()
+
     def _confirm(self, payload: dict) -> None:
         preview = self._confirmation
         if preview is None or str(payload.get("token", "")) != preview["token"]:
@@ -579,20 +711,27 @@ class QmlTradingBridge(QmlBridge):
             self._refresh_controls(preview["scope"])
             self.perform("refresh", {})
         elif preview["kind"] == "protection":
+            enabled = set(preview["enabledTickets"])
+            if not enabled:
+                raise ValueError("请至少勾选一笔待修改的持仓")
+            preview = {**preview,
+                       "plans": tuple(plan for plan in preview["plans"] if str(plan.ticket) in enabled),
+                       "rows": tuple(row for row in preview["rows"] if str(row.ticket) in enabled),
+                       "tickets": tuple(enabled)}
+            if len(preview["plans"]) > 1:
+                self._start_protection(preview, account)
+                return
             try:
-                done = execute_protection_batch(
-                    preview["operation"], preview["scope"], self.symbol_name,
-                    account, preview["rows"], preview["plans"],
-                    _records_dir("controls"), amount_usd=preview["amount_usd"],
-                    sl=preview["sl"], tp=preview["tp"], api=self._api,
-                )
-            except Exception:
+                done = self._execute_protection(preview, account)
+            except Exception as exc:
+                self._control_result = f"修改未完成：{exc}"
                 try:
                     self._refresh_controls(preview["scope"], force=True)
                 except (RuntimeError, ValueError):
                     pass
                 raise
-            self._set_state(status=f"止盈止损已修改 {len(done)} 笔；请在 MT5 核对实际状态")
+            self._control_result = f"止盈止损已修改 {len(done)} 笔；请在 MT5 核对实际状态"
+            self._set_state(status=self._control_result)
             self._refresh_controls(preview["scope"], force=True)
             self.perform("refresh", {})
         elif preview["kind"] == "journal-delete":
@@ -607,6 +746,9 @@ class QmlTradingBridge(QmlBridge):
         confirming_basic = (action == "confirm" and self._confirmation is not None
                             and self._confirmation["kind"] == "basic-order")
         try:
+            if self._protection_busy() and action not in {
+                    "journalPublish", "journalDelete", "journalReplyPublish", "cancelConfirm"}:
+                raise RuntimeError("正在执行批量修改，请等待完成后再操作")
             if action == "entryCalculate":
                 self._calculate(payload)
             elif action == "entryInvalidate":
@@ -629,6 +771,8 @@ class QmlTradingBridge(QmlBridge):
                 self._preview_control(payload)
             elif action in {"previewBreakEven", "previewBatchStops"}:
                 self._preview_protection(action, payload)
+            elif action == "protectionToggleTicket":
+                self._toggle_protection_ticket(payload)
             elif action == "journalPublish":
                 self._publish_journal(payload)
             elif action == "journalDelete":

@@ -4,10 +4,44 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    objectName: "controlView"
     property var ui
     property var pageData: ({})
     property var bridge
     property string scope: "symbol"
+    property var selectedTickets: []
+    property bool selectionInitialized: false
+    property string selectionAccount: ""
+    readonly property bool busy: Boolean(root.value("busy", false))
+
+    function toggleTicket(ticket, checked) {
+        var key = String(ticket)
+        var next = selectedTickets.filter(function(value) { return value !== key })
+        if (checked) next.push(key)
+        selectedTickets = next
+        root.request("cancelConfirm", {})
+    }
+    function selectAll(checked) {
+        selectedTickets = checked ? root.value("positions", []).map(function(row) { return String(row.ticket) }) : []
+        selectionInitialized = true
+        root.request("cancelConfirm", {})
+    }
+    onPageDataChanged: {
+        var identity = root.value("accountLabel", "")
+        if (identity !== selectionAccount) {
+            selectionAccount = identity
+            selectedTickets = []
+            selectionInitialized = false
+        }
+        if (root.value("loading", false)) return
+        var available = root.value("positions", []).map(function(row) { return String(row.ticket) })
+        if (!selectionInitialized && available.length) {
+            selectedTickets = available
+            selectionInitialized = true
+        } else {
+            selectedTickets = selectedTickets.filter(function(ticket) { return available.indexOf(ticket) >= 0 })
+        }
+    }
 
     function value(name, fallback) {
         var result = root.pageData ? root.pageData[name] : undefined
@@ -19,6 +53,9 @@ Item {
     function changeScope(value) {
         if (root.scope === value) return
         root.scope = value
+        root.selectedTickets = []
+        root.selectionInitialized = false
+        root.request("cancelConfirm", {})
         root.request("controlsRefresh", {"scope": root.scope})
     }
     function preview(kind) {
@@ -57,7 +94,7 @@ Item {
                     Text { text: "控制面板"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 28; font.weight: Font.DemiBold }
                     Text { text: "选择范围、预览目标并确认。平仓、撤单和保护价修改都会影响真实账户。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 14 }
                 }
-                UiButton { ui: root.ui; text: "刷新目标"; variant: "secondary"; onClicked: root.request("controlsRefresh", {"scope": root.scope}) }
+                UiButton { ui: root.ui; text: "刷新目标"; variant: "secondary"; enabled: !root.busy; onClicked: root.request("controlsRefresh", {"scope": root.scope}) }
             }
 
             UiCard {
@@ -71,6 +108,7 @@ Item {
                     spacing: 22
                     RadioButton {
                         id: symbolScope
+                        enabled: !root.busy
                         text: "仅当前品种 XAUUSDc"
                         checked: root.scope === "symbol"
                         onClicked: root.changeScope("symbol")
@@ -85,6 +123,7 @@ Item {
                     }
                     RadioButton {
                         id: accountScope
+                        enabled: !root.busy
                         text: "整个账户 · 所有品种"
                         checked: root.scope === "account"
                         onClicked: root.changeScope("account")
@@ -102,6 +141,60 @@ Item {
                 Text { text: root.value("accountLabel", "账户尚未连接"); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                 Text { text: root.value("summary", "等待读取持仓与挂单"); color: root.ui.accent; font.family: root.ui.fontFamily; font.pixelSize: 18; font.weight: Font.DemiBold }
             }
+
+            UiCard {
+                ui: root.ui
+                Layout.fillWidth: true
+                padding: 22
+                spacing: 12
+                RowLayout {
+                    Layout.fillWidth: true
+                    SectionHeading { ui: root.ui; title: "选择持仓"; subtitle: "勾选用于推保本及批量设置止盈止损；全部平仓仍按操作范围执行。"; Layout.fillWidth: true }
+                    Text { text: "已选 " + root.selectedTickets.length + " / " + root.value("positions", []).length + " 笔"; color: root.ui.accent; font.family: root.ui.fontFamily; font.pixelSize: 13 }
+                }
+                Rectangle {
+                    Layout.fillWidth: true; implicitHeight: 38; radius: 7; color: root.ui.surfaceAlt
+                    RowLayout {
+                        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                        UiCheckBox {
+                            ui: root.ui; objectName: "controlSelectAllPositions"
+                            Layout.preferredWidth: 28; Layout.preferredHeight: 28
+                            enabled: !root.busy && root.value("positions", []).length > 0
+                            tristate: true
+                            checkState: root.selectedTickets.length === 0 ? Qt.Unchecked : root.selectedTickets.length === root.value("positions", []).length ? Qt.Checked : Qt.PartiallyChecked
+                            onClicked: root.selectAll(checkState !== Qt.Unchecked)
+                        }
+                        Repeater { model: ["Ticket", "品种", "方向", "手数", "开仓价", "止损", "止盈", "浮盈亏"]
+                            delegate: Text { required property var modelData; Layout.fillWidth: true; text: modelData; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight } }
+                    }
+                }
+                Text { visible: !root.value("positions", []).length; text: "当前范围内没有持仓"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13; Layout.topMargin: 10; Layout.bottomMargin: 10 }
+                Repeater {
+                    model: root.value("positions", [])
+                    delegate: Rectangle {
+                        id: positionRow
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true; implicitHeight: 36; radius: 7
+                        color: index % 2 ? root.ui.surfaceAlt : root.ui.surface
+                        RowLayout {
+                            anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                            UiCheckBox {
+                                ui: root.ui; objectName: "controlPositionCheck_" + String(positionRow.modelData.ticket)
+                                Layout.preferredWidth: 28; Layout.preferredHeight: 28
+                                enabled: !root.busy
+                                checked: root.selectedTickets.indexOf(String(positionRow.modelData.ticket)) >= 0
+                                onClicked: root.toggleTicket(positionRow.modelData.ticket, checked)
+                            }
+                            Repeater {
+                                model: [modelData.ticket, modelData.symbol, modelData.side, modelData.volume, modelData.openPrice, modelData.sl, modelData.tp, modelData.profit]
+                                delegate: Text { required property var modelData; Layout.fillWidth: true; text: String(modelData === undefined || modelData === null ? "—" : modelData); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 12; elide: Text.ElideRight }
+                            }
+                        }
+                    }
+                }
+            }
+
 
             GridLayout {
                 Layout.fillWidth: true
@@ -135,7 +228,7 @@ Item {
                     }
                     UiButton {
                         ui: root.ui; text: "预览全部平仓"; variant: "danger"; Layout.fillWidth: true
-                        enabled: root.value("canClose", false)
+                        enabled: !root.busy && root.value("canClose", false)
                         onClicked: root.preview("close")
                     }
                 }
@@ -150,7 +243,7 @@ Item {
                     Item { Layout.fillHeight: true; Layout.minimumHeight: 12 }
                     UiButton {
                         ui: root.ui; text: "预览删除挂单"; variant: "danger"; Layout.fillWidth: true
-                        enabled: root.value("canRemove", false)
+                        enabled: !root.busy && root.value("canRemove", false)
                         onClicked: root.preview("remove")
                     }
                 }
@@ -161,7 +254,7 @@ Item {
                     Layout.fillHeight: true
                     padding: 22
                     spacing: 13
-                    SectionHeading { ui: root.ui; title: "一键推保本"; subtitle: "按所选范围，为每笔持仓设置可锁定约指定 USD 利润的止损。"; Layout.fillWidth: true }
+                    SectionHeading { ui: root.ui; title: "一键推保本"; subtitle: "为上方勾选的持仓设置可锁定约指定 USD 利润的止损。"; Layout.fillWidth: true }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 10
@@ -188,8 +281,8 @@ Item {
                     Item { Layout.fillHeight: true; Layout.minimumHeight: 4 }
                     UiButton {
                         ui: root.ui; text: "预览一键推保本"; variant: "primary"; Layout.fillWidth: true
-                        enabled: root.value("positions", []).length > 0 && root.validPositiveNumber(beAmountInput.text)
-                        onClicked: root.request("previewBreakEven", {"scope": root.scope, "amountUsd": beAmountInput.text.trim()})
+                        enabled: !root.busy && root.selectedTickets.length > 0 && root.validPositiveNumber(beAmountInput.text)
+                        onClicked: root.request("previewBreakEven", {"scope": root.scope, "amountUsd": beAmountInput.text.trim(), "tickets": root.selectedTickets})
                     }
                 }
                 UiCard {
@@ -199,7 +292,7 @@ Item {
                     Layout.fillHeight: true
                     padding: 22
                     spacing: 13
-                    SectionHeading { ui: root.ui; title: "批量设置止盈 / 止损"; subtitle: "为所选范围内的持仓设置统一绝对价。"; Layout.fillWidth: true }
+                    SectionHeading { ui: root.ui; title: "批量设置止盈 / 止损"; subtitle: "仅修改上方勾选的持仓，逐笔间隔 2 秒发送。"; Layout.fillWidth: true }
                     GridLayout {
                         Layout.fillWidth: true
                         columns: root.width >= 650 ? 2 : 1
@@ -248,8 +341,8 @@ Item {
                     Item { Layout.fillHeight: true; Layout.minimumHeight: 4 }
                     UiButton {
                         ui: root.ui; text: "预览批量设置"; variant: "primary"; Layout.fillWidth: true
-                        enabled: root.value("positions", []).length > 0 && root.validBatchStops()
-                        onClicked: root.request("previewBatchStops", {"scope": root.scope, "sl": stopLossInput.text.trim(), "tp": takeProfitInput.text.trim()})
+                        enabled: !root.busy && root.selectedTickets.length > 0 && root.validBatchStops()
+                        onClicked: root.request("previewBatchStops", {"scope": root.scope, "sl": stopLossInput.text.trim(), "tp": takeProfitInput.text.trim(), "tickets": root.selectedTickets})
                     }
                 }
             }
@@ -270,41 +363,9 @@ Item {
 
             GridLayout {
                 Layout.fillWidth: true
-                columns: root.width >= 1420 ? 2 : 1
+                columns: 1
                 columnSpacing: 16
                 rowSpacing: 16
-
-                UiCard {
-                    ui: root.ui
-                    Layout.fillWidth: true
-                    padding: 22
-                    spacing: 12
-                    SectionHeading { ui: root.ui; title: "范围内持仓"; subtitle: "当前范围的实时持仓快照"; Layout.fillWidth: true }
-                    Rectangle {
-                        Layout.fillWidth: true; implicitHeight: 34; radius: 7; color: root.ui.surfaceAlt
-                        RowLayout {
-                            anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
-                            Repeater { model: ["Ticket", "品种", "方向", "手数", "开仓价", "浮盈亏"]
-                                delegate: Text { required property var modelData; Layout.fillWidth: true; text: modelData; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight } }
-                        }
-                    }
-                    Text { visible: !root.value("positions", []).length; text: "当前范围内没有持仓"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13; Layout.topMargin: 10; Layout.bottomMargin: 10 }
-                    Repeater {
-                        model: root.value("positions", [])
-                        delegate: Rectangle {
-                            required property var modelData
-                            Layout.fillWidth: true; implicitHeight: 36; radius: 7
-                            color: index % 2 ? root.ui.surfaceAlt : root.ui.surface
-                            RowLayout {
-                                anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
-                                Repeater {
-                                    model: [modelData.ticket, modelData.symbol, modelData.side, modelData.volume, modelData.openPrice, modelData.profit]
-                                    delegate: Text { required property var modelData; Layout.fillWidth: true; text: String(modelData === undefined || modelData === null ? "—" : modelData); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 12; elide: Text.ElideRight }
-                                }
-                            }
-                        }
-                    }
-                }
 
                 UiCard {
                     ui: root.ui
@@ -325,6 +386,7 @@ Item {
                         model: root.value("orders", [])
                         delegate: Rectangle {
                             required property var modelData
+                            required property int index
                             Layout.fillWidth: true; implicitHeight: 36; radius: 7
                             color: index % 2 ? root.ui.surfaceAlt : root.ui.surface
                             RowLayout {

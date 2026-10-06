@@ -676,6 +676,12 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 29
                                 spacing: 8
+                                Text {
+                                    visible: root.confirmation.selectable === true
+                                    Layout.preferredWidth: 28
+                                    text: "选择"; color: theme.muted
+                                    font.family: theme.fontFamily; font.pixelSize: 11
+                                }
                                 Repeater {
                                     model: root.confirmation.columns || []
                                     delegate: Text {
@@ -693,10 +699,19 @@ ApplicationWindow {
                             Repeater {
                                 model: root.confirmation.rows || []
                                 delegate: RowLayout {
+                                    id: confirmationRow
                                     required property var modelData
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 31
                                     spacing: 8
+                                    UiCheckBox {
+                                        ui: theme
+                                        objectName: "protectionConfirmCheck_" + String(confirmationRow.modelData[0])
+                                        visible: root.confirmation.selectable === true
+                                        Layout.preferredWidth: 28; Layout.preferredHeight: 28
+                                        checked: (root.confirmation.selectedTickets || []).indexOf(String(confirmationRow.modelData[0])) >= 0
+                                        onClicked: root.action("protectionToggleTicket", {ticket: String(confirmationRow.modelData[0]), checked: checked})
+                                    }
                                     Repeater {
                                         model: parent.modelData
                                         delegate: Text {
@@ -743,6 +758,7 @@ ApplicationWindow {
                     UiButton {
                         ui: theme
                         text: root.confirmation.confirmText || "确认"
+                        enabled: root.confirmation.selectable !== true || (root.confirmation.selectedTickets || []).length > 0
                         variant: root.confirmation.danger ? "danger" : "primary"
                         Layout.preferredWidth: Math.max(110, implicitWidth)
                         onClicked: root.action("confirm", {token: root.confirmationToken})
