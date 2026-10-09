@@ -145,7 +145,7 @@ Item {
                 }
                 Text {
                     text: page.pageData.loading ? "正在后台读取 MT5 历史数据…"
-                          : page.pageData.asOf ? "更新于 " + page.pageData.asOf : "连接 MT5 后读取订单历史。"
+                          : page.pageData.asOf ? "更新于 " + ui.formatTime(page.pageData.asOf, false) + " " + ui.timeZoneLabel : "连接 MT5 后读取订单历史。"
                     color: ui.faint
                     font.family: ui.fontFamily
                     font.pixelSize: 11
@@ -343,7 +343,7 @@ Item {
                 title: "最近成交"
                 rows: page.pageData.recentDeals || []
                 columns: [
-                    {key:"ticket",label:"Ticket",weight:1}, {key:"executedAt",label:"成交时间",weight:1.6},
+                    {key:"ticket",label:"Ticket",weight:1}, {key:"executedAt",label:"成交时间 · " + ui.timeZoneLabel,weight:1.6,format:"time"},
                     {key:"side",label:"方向",weight:0.8}, {key:"volume",label:"手数",format:"lots",weight:0.8},
                     {key:"price",label:"成交价",format:"price",weight:1},
                     {key:"cashflow",label:"净现金流 USC",format:"money",weight:1.3}
@@ -357,7 +357,7 @@ Item {
                 title: "历史订单"
                 rows: page.pageData.recentOrders || []
                 columns: [
-                    {key:"ticket",label:"Ticket",weight:1}, {key:"createdAt",label:"创建时间",weight:1.6},
+                    {key:"ticket",label:"Ticket",weight:1}, {key:"createdAt",label:"创建时间 · " + ui.timeZoneLabel,weight:1.6,format:"time"},
                     {key:"type",label:"类型",weight:1.2}, {key:"status",label:"状态",weight:1},
                     {key:"volumeInitial",label:"初始手数",format:"lots",weight:1},
                     {key:"priceOpen",label:"委托价",format:"price",weight:1}

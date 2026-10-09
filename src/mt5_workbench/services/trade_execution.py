@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import MetaTrader5 as mt5
@@ -32,7 +32,7 @@ def _aligned(value: Decimal, step: Decimal) -> bool:
 
 
 def _require_limit_requests(requests: tuple[dict, ...]) -> None:
-    """Reject every non-LIMIT request before any MT5 check or send call."""
+    """Require LIMIT requests with a stop loss before any MT5 check or send."""
     if not requests:
         raise ValueError("没有可发送的 LIMIT 挂单")
     for index, request in enumerate(requests, 1):
@@ -40,6 +40,12 @@ def _require_limit_requests(requests: tuple[dict, ...]) -> None:
                 or request.get("action") != mt5.TRADE_ACTION_PENDING
                 or request.get("type") not in LIMIT_ORDER_TYPES):
             raise ValueError(f"第 {index} 档仅允许 BUY LIMIT 或 SELL LIMIT 挂单")
+        try:
+            stop = _number(request.get("sl", 0))
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise ValueError(f"第 {index} 档限价单必须设置有效止损价") from exc
+        if not stop.is_finite() or stop <= 0:
+            raise ValueError(f"第 {index} 档限价单必须设置有效止损价")
 
 
 def build_requests(result: Optimization, symbol, tick, account,

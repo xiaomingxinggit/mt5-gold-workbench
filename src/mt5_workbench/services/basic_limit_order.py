@@ -21,8 +21,8 @@ def basic_fields(payload: dict) -> dict[str, str]:
 
 
 def build_basic_request(fields: dict, account, symbol, tick, *, api=mt5,
-                        now: float | None = None) -> tuple[dict, Decimal | None]:
-    """Return one validated pending request and its optional SL risk in USD."""
+                        now: float | None = None) -> tuple[dict, Decimal]:
+    """Return one validated pending request with mandatory SL risk in USD."""
     if not is_usc_account(account):
         raise ValueError("仅支持 USC 美分账户")
     if not account.trade_allowed or not account.trade_expert:
@@ -43,7 +43,9 @@ def build_basic_request(fields: dict, account, symbol, tick, *, api=mt5,
         raise ValueError("仅允许买入限价或卖出限价")
     price = money(fields["price"], "限价")
     volume = money(fields["volume"], "手数")
-    sl = money(fields["sl"], "止损价") if fields["sl"] else Decimal(0)
+    if not fields["sl"].strip():
+        raise ValueError("限价单必须设置止损价")
+    sl = money(fields["sl"], "止损价")
     tp = money(fields["tp"], "止盈价") if fields["tp"] else Decimal(0)
     if not all(math.isfinite(float(value)) for value in (price, volume, sl, tp)):
         raise ValueError("价格或手数超出有效范围")
@@ -61,30 +63,28 @@ def build_basic_request(fields: dict, account, symbol, tick, *, api=mt5,
     if side == "BUY":
         if price >= Decimal(str(tick.bid)) - distance:
             raise ValueError("买入限价必须低于当前 Bid，并满足最小挂单距离")
-        if sl and sl >= price - distance:
+        if sl >= price - distance:
             raise ValueError("买入止损必须低于限价，并满足最小距离")
         if tp and tp <= price + distance:
             raise ValueError("买入止盈必须高于限价，并满足最小距离")
     else:
         if price <= Decimal(str(tick.ask)) + distance:
             raise ValueError("卖出限价必须高于当前 Ask，并满足最小挂单距离")
-        if sl and sl <= price + distance:
+        if sl <= price + distance:
             raise ValueError("卖出止损必须高于限价，并满足最小距离")
         if tp and tp >= price - distance:
             raise ValueError("卖出止盈必须低于限价，并满足最小距离")
-    if sl and not symbol.order_mode & ORDER_MODE_SL:
+    if not symbol.order_mode & ORDER_MODE_SL:
         raise ValueError("该品种不支持挂单止损")
     if tp and not symbol.order_mode & ORDER_MODE_TP:
         raise ValueError("该品种不支持挂单止盈")
-    risk = None
-    if sl:
-        profit = api.order_calc_profit(
-            mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL,
-            symbol.name, float(volume), float(price), float(sl),
-        )
-        if profit is None or not math.isfinite(float(profit)) or profit >= 0:
-            raise ValueError("MT5 无法核对止损风险")
-        risk = -Decimal(str(profit)) / 100
+    profit = api.order_calc_profit(
+        mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL,
+        symbol.name, float(volume), float(price), float(sl),
+    )
+    if profit is None or not math.isfinite(float(profit)) or profit >= 0:
+        raise ValueError("MT5 无法核对止损风险")
+    risk = -Decimal(str(profit)) / 100
     return {
         "action": mt5.TRADE_ACTION_PENDING, "symbol": symbol.name,
         "type": mt5.ORDER_TYPE_BUY_LIMIT if side == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT,

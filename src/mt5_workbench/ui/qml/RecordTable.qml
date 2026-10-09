@@ -17,6 +17,7 @@ UiCard {
     function cellText(record, column) {
         const value = record && column && column.key ? record[column.key] : undefined
         if (value === undefined || value === null || value === "") return "—"
+        if (column.format === "time") return table.ui.formatTime(value, false)
         if (column.format === "money") {
             const n = Number(value)
             return isFinite(n) ? (n >= 0 ? "+" : "") + n.toFixed(2) : "—"

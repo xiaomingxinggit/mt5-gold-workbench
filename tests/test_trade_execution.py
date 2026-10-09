@@ -150,6 +150,25 @@ class TradeExecutionTests(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [])
         self.assertEqual((api.order_reads, api.checked, api.sent), (0, [], []))
 
+    def test_missing_or_invalid_stop_blocks_entire_limit_batch_before_api_calls(self):
+        for order_type in (mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT):
+            for stop in (None, "", "bad", 0, -1, float("nan"), float("inf")):
+                with self.subTest(order_type=order_type, stop=stop):
+                    request = {**self.request, "type": order_type}
+                    if stop is None:
+                        request.pop("sl")
+                    else:
+                        request["sl"] = stop
+                    requests = (self.request, request)
+                    api = FakeAPI(self.account)
+                    with self.assertRaisesRegex(ValueError, "第 2 档限价单必须设置有效止损价"):
+                        check_requests(requests, api=api)
+                    with TemporaryDirectory() as directory:
+                        with self.assertRaisesRegex(ValueError, "第 2 档限价单必须设置有效止损价"):
+                            send_checked(self.account, requests, Path(directory), api=api)
+                        self.assertEqual(list(Path(directory).iterdir()), [])
+                    self.assertEqual((api.order_reads, api.checked, api.sent), (0, [], []))
+
     def test_check_api_cannot_mutate_the_request_that_is_sent(self):
         class MutatingCheckAPI(FakeAPI):
             def order_check(self, request):

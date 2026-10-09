@@ -15,8 +15,9 @@ UiCard {
     RowLayout {
         Layout.fillWidth: true
         spacing: 12
-        Text { text: String(card.post.timeLabel || "—"); color: card.ui.text; font.family: card.ui.fontFamily; font.pixelSize: 16; font.weight: Font.DemiBold }
+        Text { text: card.post.createdAt ? card.ui.formatTime(card.post.createdAt, true) : String(card.post.timeLabel || "—"); color: card.ui.text; font.family: card.ui.fontFamily; font.pixelSize: 16; font.weight: Font.DemiBold }
         Item { Layout.fillWidth: true }
+        UiButton { objectName: "journalShare"; ui: card.ui; text: "分享"; variant: "ghost"; onClicked: card.journal.request("journalShare", {postId: card.postId}) }
         UiButton { ui: card.ui; text: "删除"; variant: "ghost"; onClicked: card.journal.request("journalDelete", {postId: card.postId}) }
     }
     Text { Layout.fillWidth: true; visible: text.length > 0; text: String(card.post.body || ""); textFormat: Text.PlainText; color: card.ui.text; font.family: card.ui.fontFamily; font.pixelSize: 14; wrapMode: Text.Wrap }
@@ -69,7 +70,7 @@ UiCard {
             spacing: 8
             color: card.ui.surfaceAlt
             border.width: 0
-            Text { text: String(modelData.dateLabel || "") + " " + String(modelData.timeLabel || ""); color: card.ui.muted; font.family: card.ui.fontFamily; font.pixelSize: 12 }
+            Text { text: modelData.createdAt ? card.ui.dateLabel(modelData.createdAt) + " " + card.ui.formatTime(modelData.createdAt, true) : String(modelData.dateLabel || "") + " " + String(modelData.timeLabel || ""); color: card.ui.muted; font.family: card.ui.fontFamily; font.pixelSize: 12 }
             Text { Layout.fillWidth: true; visible: text.length > 0; text: String(modelData.body || ""); textFormat: Text.PlainText; color: card.ui.text; font.family: card.ui.fontFamily; font.pixelSize: 13; wrapMode: Text.Wrap }
             JournalImageStrip {
                 ui: card.ui

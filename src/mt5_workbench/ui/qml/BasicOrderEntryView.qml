@@ -4,15 +4,16 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    objectName: "basicOrderEntryView"
     property var ui
     property var pageData: ({})
     property var market: ({})
     property var account: ({})
     property var connection: ({})
     property var bridge
-    property var form: ({side: "BUY", price: "", volume: "0.01", sl: "", tp: ""})
+    property var form: ({side: "BUY", price: "", volume: "0.5", sl: "", tp: ""})
 
-    function resetForm() { form = {side: "BUY", price: "", volume: "0.01", sl: "", tp: ""} }
+    function resetForm() { form = {side: "BUY", price: "", volume: "0.5", sl: "", tp: ""} }
     function updateField(name, value) {
         var next = Object.assign({}, form)
         next[name] = value
@@ -63,8 +64,8 @@ Item {
                     Repeater {
                         model: [
                             {key: "price", title: "限价", hint: "输入挂单价格"},
-                            {key: "volume", title: "数量 · 手", hint: "例如 0.01"},
-                            {key: "sl", title: "止损价 · 可选", hint: "留空则不设止损"},
+                            {key: "volume", title: "数量 · 手", hint: "默认 0.5"},
+                            {key: "sl", title: "止损价 · 必填", hint: "输入止损价才能挂单"},
                             {key: "tp", title: "止盈价 · 可选", hint: "留空则不设止盈"}
                         ]
                         delegate: ColumnLayout {
@@ -102,7 +103,7 @@ Item {
                     objectName: "basicOrderPreviewButton"
                     ui: root.ui; text: "预览" + (root.form.side === "BUY" ? "买入" : "卖出") + "限价单"
                     variant: "primary"; Layout.fillWidth: true; Layout.preferredHeight: 44
-                    enabled: root.connection.connected === true && !root.connection.locked && root.form.price.trim().length > 0 && root.form.volume.trim().length > 0
+                    enabled: root.connection.connected === true && !root.connection.locked && root.form.price.trim().length > 0 && root.form.volume.trim().length > 0 && root.form.sl.trim().length > 0 && isFinite(Number(root.form.sl)) && Number(root.form.sl) > 0
                     onClicked: if (root.bridge) root.bridge.perform("basicPreview", root.form)
                 }
             }
@@ -135,7 +136,7 @@ Item {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: root.form.sl.trim() ? "预览时按当前账户合约计算止损风险；估算未计入跳空、手续费及隔夜费。" : "当前未填写止损，亏损风险未限定。可在发送前填写止损价。"
+                    text: "限价单必须设置有效止损。预览时按当前账户合约计算止损风险；估算未计入跳空、手续费及隔夜费。"
                     color: root.ui.warning; font.family: root.ui.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap
                 }
             }

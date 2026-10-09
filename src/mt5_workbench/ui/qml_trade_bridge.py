@@ -85,7 +85,7 @@ class QmlTradingBridge(QmlBridge):
         if self._protection_busy():
             self._protection_cancel.set()
             self._protection_reconnect = True
-            self._set_status("正在停止批量修改，然后重新连接…")
+            self._set_status("正在停止批量修改，然后重新连接…", notify=False)
             return
         self._control_result = ""
         self._plan = None
@@ -102,7 +102,7 @@ class QmlTradingBridge(QmlBridge):
             try:
                 self._refresh_controls(self._control_scope, force=force)
             except (RuntimeError, ValueError, OSError) as exc:
-                self._set_state(status=f"控制目标读取失败：{exc}")
+                self._set_status(f"控制目标读取失败：{exc}", level="error")
             return
         super()._refresh_page(page, force=force)
 
@@ -318,19 +318,19 @@ class QmlTradingBridge(QmlBridge):
             "kind": "basic-order", "token": token, "fields": fields,
             "account": (account.login, account.server), "requests": (request,),
         }
-        risk_text = f"{risk:.2f} USD" if risk is not None else "未设止损，风险未限定"
-        self._set_state(basicOrder={"risk": risk_text, "message": "已通过挂单预检查"},
+        risk_text = f"{risk:.2f} USD"
+        self._set_state(status="已通过挂单预检查",
+                        basicOrder={"risk": risk_text, "message": "已通过挂单预检查"},
                         confirmation={
             "token": token, "title": "确认基础限价单", "heading": "发送挂单前核对",
             "details": (f"账户 {account.login} · {account.server} · {account.currency}\n"
                         f"{symbol.name} · Bid {tick.bid:.{symbol.digits}f} / "
                         f"Ask {tick.ask:.{symbol.digits}f} · GTC 长期有效"),
             "warning": ("确认后将发送 1 笔真实 LIMIT 挂单。" +
-                        ("未设置止损，亏损风险未限定。" if risk is None else "") +
                         "估算未计入跳空、手续费及隔夜费；失败时不会自动重试。"),
             "columns": ["类型", "限价", "手数", "止损", "止盈", "风险 USD"],
             "rows": [[fields["side"] + " LIMIT", fields["price"], fields["volume"],
-                      fields["sl"] or "—", fields["tp"] or "—", risk_text]],
+                      fields["sl"], fields["tp"] or "—", risk_text]],
             "confirmText": "确认发送", "danger": True,
         })
 
@@ -344,7 +344,8 @@ class QmlTradingBridge(QmlBridge):
                                        include_positions=positions_due,
                                        include_orders=orders_due)
             except (RuntimeError, ValueError, OSError) as exc:
-                self._set_status(f"控制目标读取失败：{exc}")
+                self._set_status(f"控制目标读取失败：{exc}", level="error",
+                                 notify=self.state.get("status") != f"控制目标读取失败：{exc}")
 
     def _refresh_controls(self, scope: str, *, force: bool = False,
                           include_positions: bool = True,
@@ -375,12 +376,13 @@ class QmlTradingBridge(QmlBridge):
             "status": self._control_result or (previous.get("status", "正在读取目标…") if same_scope else "正在读取目标…"),
             "positions": positions, "orders": orders,
             "canClose": bool(positions), "canRemove": bool(orders),
+            "errors": previous.get("errors", []) if same_scope else [],
             "loading": True, "busy": False,
         }
         self._set_state(controls=snapshot)
 
         def load(api) -> dict:
-            result = {**snapshot, "loading": False,
+            result = {**snapshot, "loading": False, "errors": [],
                       "status": self._control_result or "目标已更新"}
             if include_positions:
                 active = load_targets("close", scope, self.symbol_name, api=api)
@@ -629,7 +631,7 @@ class QmlTradingBridge(QmlBridge):
             self._set_state(journal={**self.state["journal"],
                                      "posts": [_journal_post(post) for post in feed.posts]})
         except (OSError, sqlite3.Error) as exc:
-            self._set_status(f"回复已保存，列表刷新失败：{exc}")
+            self._set_status(f"回复已保存，列表刷新失败：{exc}", level="warning")
         self.refresh_journal(force=True)
 
     def _protection_busy(self) -> bool:
@@ -659,18 +661,20 @@ class QmlTradingBridge(QmlBridge):
 
         def progress(done, total, ticket):
             self._protection_events.put(("progress", identity,
-                                        f"已修改 {done}/{total} 笔 · #{ticket}；逐笔间隔 2 秒"))
+                                        f"已修改 {done}/{total} 笔 · #{ticket}；逐笔间隔 2 秒", "info"))
 
         def run():
+            level = "success"
             try:
                 done = self._execute_protection(preview, account, cancelled=cancelled, progress=progress)
                 message = f"止盈止损已修改 {len(done)} 笔；请在 MT5 核对实际状态"
             except Exception as exc:
                 message = f"批量修改未全部完成：{exc}"
+                level = "error"
             finally:
                 if self._shutdown_after_protection:
                     self._api.shutdown()
-            self._protection_events.put(("done", identity, message))
+            self._protection_events.put(("done", identity, message, level))
 
         self._protection_thread = Thread(target=run, name="mt5-protection-writes", daemon=True)
         try:
@@ -684,17 +688,19 @@ class QmlTradingBridge(QmlBridge):
     def _consume_protection(self) -> None:
         while True:
             try:
-                kind, identity, message = self._protection_events.get_nowait()
+                kind, identity, message, level = self._protection_events.get_nowait()
             except Empty:
                 break
             if kind == "done":
                 if self._protection_thread is not None and self._protection_thread.is_alive():
-                    self._protection_events.put((kind, identity, message))
+                    self._protection_events.put((kind, identity, message, level))
                     break
                 self._protection_thread = None
                 self._protection_timer.stop()
             if not self._closing and self.connected and identity == self._identity():
-                self._set_state(status=message, controls={**self.state["controls"],
+                self._set_state(notify_status=kind == "done",
+                                status_level=level,
+                                status=message, controls={**self.state["controls"],
                                                          "busy": kind != "done", "status": message})
                 if kind == "done" and self.check_account_access():
                     self._control_result = message
@@ -804,6 +810,7 @@ class QmlTradingBridge(QmlBridge):
                 self._set_state(basicOrder={})
             elif action == "controlsRefresh":
                 self._refresh_controls(str(payload.get("scope", self._control_scope)), force=True)
+                self._mark_manual_refresh("controls")
             elif action == "controlsPreview":
                 self._preview_control(payload)
             elif action in {"previewBreakEven", "previewBatchStops"}:
@@ -824,15 +831,16 @@ class QmlTradingBridge(QmlBridge):
                 raise ValueError(f"未知操作：{action}")
         except (RuntimeError, ValueError, TypeError, OSError, sqlite3.Error,
                 InvalidOperation) as exc:
-            self._set_state(status=f"操作未完成：{exc}")
+            updated = {"status": f"操作未完成：{exc}"}
             if action == "basicPreview" or confirming_basic:
-                self._set_state(basicOrder={"error": str(exc)})
+                updated["basicOrder"] = {"error": str(exc)}
             elif action in {"entryCalculate", "entryPreview"}:
                 optimizer = dict(self.state.get("optimizer", {}))
                 optimizer["warning"] = str(exc)
-                self._set_state(optimizer=optimizer)
+                updated["optimizer"] = optimizer
             elif action in {"controlsRefresh", "controlsPreview",
                             "previewBreakEven", "previewBatchStops", "confirm"}:
                 controls = dict(self.state.get("controls", {}))
                 controls["status"] = str(exc)
-                self._set_state(controls=controls)
+                updated["controls"] = controls
+            self._set_state(status_level="error", notify_errors=False, **updated)

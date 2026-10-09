@@ -12,6 +12,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from mt5_workbench.config import state_directory
+
 
 THEMES: dict[str, dict[str, str]] = {
     "dark": {
@@ -84,9 +86,7 @@ MAX_CONTENT_WIDTH = 1760
 
 def theme_settings_path() -> Path:
     """Use a writable ``state`` folder next to source or the packaged EXE."""
-    base = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
-            else Path(__file__).resolve().parents[3])
-    return base / "state" / "ui_settings.json"
+    return state_directory("ui_settings.json")
 
 
 def system_theme() -> str:

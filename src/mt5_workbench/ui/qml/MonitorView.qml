@@ -162,8 +162,8 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 22
-                    Text { text: "M1 K 线：" + root.value("barTime", "—"); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
-                    Text { text: "采集时间：" + root.value("observedAt", "—"); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                    Text { text: "M1 K 线：" + root.ui.formatTime(root.value("barTime", "—"), false); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                    Text { text: "采集时间：" + root.ui.formatTime(root.value("observedAt", "—"), false) + " " + root.ui.timeZoneLabel; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                 }
             }
 
@@ -195,7 +195,7 @@ Item {
                         RowLayout {
                             anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
                             Text { Layout.fillWidth: true; text: String(modelData.observedAt || "—"); color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 13 }
-                            Text { Layout.fillWidth: true; text: "M1  " + String(modelData.barTime || "—"); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13 }
+                            Text { Layout.fillWidth: true; text: "M1  " + root.ui.formatTime(modelData.barTime, false); color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 13 }
                             Text { text: root.number(modelData.spreadPoints, 4) + " point"; color: root.ui.accent; font.family: root.ui.fontFamily; font.pixelSize: 13; font.weight: Font.DemiBold }
                         }
                     }

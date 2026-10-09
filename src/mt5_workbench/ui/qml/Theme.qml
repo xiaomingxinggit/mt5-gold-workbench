@@ -4,6 +4,27 @@ QtObject {
     id: theme
 
     property bool dark: false
+    property int timeOffsetMinutes: 480
+    property string timeZoneLabel: "UTC+08:00"
+    property bool followSystemTime: false
+
+    function dateParts(value) {
+        if (!value) return ""
+        const date = new Date(String(value))
+        if (!isFinite(date.getTime())) return ""
+        const offset = followSystemTime ? -date.getTimezoneOffset() : timeOffsetMinutes
+        return new Date(date.getTime() + offset * 60000).toISOString()
+    }
+    function formatTime(value, timeOnly) {
+        const parts = dateParts(value)
+        if (!parts) return value ? String(value) : "—"
+        return timeOnly ? parts.slice(11, 16) : parts.slice(0, 19).replace("T", " ")
+    }
+    function dateKey(value) { return dateParts(value).slice(0, 10) }
+    function dateLabel(value) {
+        const parts = dateParts(value)
+        return parts ? Number(parts.slice(0, 4)) + "年" + Number(parts.slice(5, 7)) + "月" + Number(parts.slice(8, 10)) + "日" : "日期未知"
+    }
     readonly property string fontFamily: "Microsoft YaHei UI"
 
     readonly property color bg: dark ? "#0C1420" : "#F4F7FB"

@@ -140,13 +140,13 @@ class QmlTradeBridgeTests(unittest.TestCase):
         self.assertEqual(api.sent, [])
         self.assertFalse(bridge.state["connection"]["connected"])
 
-    def test_basic_preview_cancel_and_optional_protection(self):
+    def test_basic_preview_cancel_with_required_stop_and_optional_take_profit(self):
         bridge, api = self.make_bridge()
-        fields = {"side": "SELL", "price": "4200", "volume": "0.01", "sl": "", "tp": ""}
+        fields = {"side": "SELL", "price": "4200", "volume": "0.01", "sl": "4210", "tp": ""}
         bridge.perform("basicPreview", fields)
         preview = bridge.state["confirmation"]
         self.assertEqual(preview["title"], "确认基础限价单")
-        self.assertIn("风险未限定", preview["warning"])
+        self.assertEqual(bridge.state["basicOrder"]["risk"], "0.10 USD")
         self.assertEqual(api.sent, [])
         bridge.perform("cancelConfirm", {})
         self.assertEqual(api.sent, [])
@@ -156,13 +156,13 @@ class QmlTradeBridgeTests(unittest.TestCase):
     def test_basic_confirmation_sends_one_minimum_limit_once(self):
         for side, price, sl, tp in (("BUY", "4190", "4180", "4200"),
                                     ("SELL", "4200", "4210", "4190"),
-                                    ("SELL", "4200", "", "")):
+                                    ("SELL", "4200", "4210", "")):
             with self.subTest(side=side):
                 bridge, api = self.make_bridge()
                 fields = {"side": side, "price": price, "volume": "0.01", "sl": sl, "tp": tp}
                 bridge.perform("basicPreview", fields)
                 self.assertEqual(bridge.state["basicOrder"]["risk"],
-                                 "0.10 USD" if sl else "未设止损，风险未限定")
+                                 "0.10 USD")
                 token = bridge.state["confirmation"]["token"]
                 self.assertEqual(api.sent, [])
                 with tempfile.TemporaryDirectory() as temp, patch.object(
@@ -176,6 +176,33 @@ class QmlTradeBridgeTests(unittest.TestCase):
                                      if side == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT)
                     self.assertEqual(api.sent[0]["sl"], float(sl or 0))
                     self.assertEqual(api.sent[0]["tp"], float(tp or 0))
+
+    def test_basic_requires_valid_stop_for_both_limit_directions(self):
+        for side, price in (("BUY", "4190"), ("SELL", "4200")):
+            for stop in (None, "", "  ", "0", "-1", "NaN", "Infinity", "invalid"):
+                with self.subTest(side=side, stop=stop):
+                    bridge, api = self.make_bridge()
+                    fields = {"side": side, "price": price, "volume": "0.01", "tp": ""}
+                    if stop is not None:
+                        fields["sl"] = stop
+                    with patch.object(api, "order_check", wraps=api.order_check) as checked:
+                        bridge.perform("basicPreview", fields)
+                        checked.assert_not_called()
+                    self.assertEqual(bridge.state["confirmation"], {})
+                    self.assertIn("止损价", bridge.state["basicOrder"]["error"])
+                    self.assertEqual(api.sent, [])
+
+    def test_basic_confirmation_rejects_removed_stop(self):
+        bridge, api = self.make_bridge()
+        bridge.perform("basicPreview", {"side": "SELL", "price": "4200",
+                       "volume": "0.01", "sl": "4210", "tp": ""})
+        token = bridge.state["confirmation"]["token"]
+        bridge._confirmation["fields"]["sl"] = ""
+        with patch.object(api, "order_check", wraps=api.order_check) as checked:
+            bridge.perform("confirm", {"token": token})
+            checked.assert_not_called()
+        self.assertEqual(bridge.state["confirmation"], {})
+        self.assertEqual(api.sent, [])
 
     def test_basic_respects_symbol_constraints_and_account_policy(self):
         for changes in ({"order_mode": 0}, {"order_mode": 2 | 32},

@@ -69,10 +69,10 @@ Item {
         var posts = root.value("posts", [])
         for (var i = 0; i < posts.length; ++i) {
             var post = posts[i]
-            var key = String(post.dateKey || "")
+            var key = post.createdAt ? root.ui.dateKey(post.createdAt) : String(post.dateKey || "")
             var group = groups.length ? groups[groups.length - 1] : null
             if (!group || group.key !== key) {
-                group = {key: key, label: String(post.dateLabel || "日期未知"), posts: []}
+                group = {key: key, label: post.createdAt ? root.ui.dateLabel(post.createdAt) : String(post.dateLabel || "日期未知"), posts: []}
                 groups.push(group)
             }
             group.posts.push(post)
@@ -276,7 +276,7 @@ Item {
                         Layout.fillWidth: true
                         spacing: 4
                         Text { objectName: "journalHeatmapTitle"; text: "记录轨迹"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 17; font.weight: Font.DemiBold }
-                        Text { text: "每个方块代表一天；悬停可查看当日记录数。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                        Text { text: "北京时间 · 每个方块代表一天；悬停可查看当日记录数。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                     }
                     RowLayout {
                         Layout.alignment: Qt.AlignRight
@@ -379,7 +379,7 @@ Item {
                 Layout.fillWidth: true
                 spacing: 12
                 Text { text: "最新记录"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 17; font.weight: Font.DemiBold }
-                Text { text: "北京时间 · UTC+8"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
+                Text { text: root.ui.timeZoneLabel; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
                 Item { Layout.fillWidth: true }
                 Text { text: "共 " + String(root.value("total", 0)) + " 篇 · 每页 10 篇"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12 }
             }

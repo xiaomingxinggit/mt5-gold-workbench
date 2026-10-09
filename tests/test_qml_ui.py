@@ -37,7 +37,7 @@ class QmlUiTests(unittest.TestCase):
         QQuickStyle.setStyle("FluentWinUI3")
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_six_pages_theme_and_window_size_load_without_mt5(self):
+    def test_seven_pages_theme_and_window_size_load_without_mt5(self):
         bridge = QmlTradingBridge(autoconnect=False, start_timer=False,
                                   journal_repository=object())
         bridge._set_state(theme="light")
@@ -59,6 +59,32 @@ class QmlUiTests(unittest.TestCase):
             self.app.processEvents()
             entry_view = window.findChild(QQuickItem, "orderEntryView")
             self.assertEqual(entry_view.property("currentTab"), 0)
+            basic_view = window.findChild(QQuickItem, "basicOrderEntryView")
+            volume_field = visual_find(window.contentItem(), "basicOrderField_volume")
+            stop_field = visual_find(window.contentItem(), "basicOrderField_sl")
+            preview_button = window.findChild(QQuickItem, "basicOrderPreviewButton")
+            self.assertEqual(volume_field.property("text"), "0.5")
+            self.assertIn("止损", stop_field.property("placeholderText"))
+            bridge._set_state(connection={"connected": True, "locked": False})
+            QMetaObject.invokeMethod(basic_view, "updateField",
+                                     Q_ARG("QVariant", "price"), Q_ARG("QVariant", "4190"))
+            for stop, enabled in (("", False), ("  ", False), ("0", False),
+                                  ("-1", False), ("NaN", False), ("Infinity", False),
+                                  ("4180", True), ("", False)):
+                QMetaObject.invokeMethod(basic_view, "updateField",
+                                         Q_ARG("QVariant", "sl"), Q_ARG("QVariant", stop))
+                self.app.processEvents()
+                self.assertEqual(preview_button.property("enabled"), enabled)
+            QMetaObject.invokeMethod(basic_view, "updateField",
+                                     Q_ARG("QVariant", "volume"), Q_ARG("QVariant", "0.01"))
+            self.app.processEvents()
+            self.assertEqual(volume_field.property("text"), "0.01")
+            bridge._set_state(account={"login": 202, "server": "test-server"},
+                              connection={"connected": False, "locked": False})
+            self.app.processEvents()
+            self.assertEqual(volume_field.property("text"), "0.5")
+            self.assertEqual(stop_field.property("text"), "")
+            self.assertFalse(preview_button.property("enabled"))
             for width in (1200, 1440, 2560):
                 window.setWidth(width)
                 self.app.processEvents()

@@ -46,7 +46,7 @@ Item {
         const rows = chart.validRows()
         if (chart.hoverIndex < 0 || chart.hoverIndex >= rows.length) return ""
         const row = rows[chart.hoverIndex]
-        const label = String(row.day || row.time || "")
+        const label = row.day || (row.time ? chart.ui.formatTime(row.time, false) + " " + chart.ui.timeZoneLabel : "")
         if (chart.mode === "candles")
             return label + "\n开 " + chart.valueOf(row, "open").toFixed(3)
                    + "  高 " + chart.valueOf(row, "high").toFixed(3)
@@ -65,6 +65,8 @@ Item {
     Connections {
         target: chart.ui
         function onDarkChanged() { canvas.requestPaint() }
+        function onTimeOffsetMinutesChanged() { canvas.requestPaint() }
+        function onFollowSystemTimeChanged() { canvas.requestPaint() }
     }
 
     Canvas {
@@ -201,8 +203,8 @@ Item {
             ctx.textAlign = "left"
             const first = rows[0]
             const last = rows[rows.length - 1]
-            const firstLabel = first.day || first.time || ""
-            const lastLabel = last.day || last.time || ""
+            const firstLabel = first.day || chart.ui.formatTime(first.time, false)
+            const lastLabel = last.day || chart.ui.formatTime(last.time, false)
             ctx.fillText(String(firstLabel).slice(0, 16), left, height - 6)
             ctx.textAlign = "right"
             ctx.fillText(String(lastLabel).slice(0, 16), right, height - 6)

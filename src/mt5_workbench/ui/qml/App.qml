@@ -38,6 +38,8 @@ ApplicationWindow {
     property var basicOrderData: ({})
     property var controlsData: ({})
     property var monitorData: ({})
+    property var indicatorsData: ({})
+    property var systemData: ({})
     property var confirmation: ({})
     property var refreshIntervals: ({quote: 1, positions: 5, orders: 30})
     property string themeName: "light"
@@ -58,10 +60,13 @@ ApplicationWindow {
         else if (name === "basicOrder") basicOrderData = value || ({});
         else if (name === "controls") controlsData = value || ({});
         else if (name === "monitor") monitorData = value || ({});
+        else if (name === "indicators") indicatorsData = value || ({});
+        else if (name === "system") systemData = value || ({});
         else if (name === "confirmation") confirmation = value || ({});
         else if (name === "refreshIntervals") refreshIntervals = value || ({quote: 1, positions: 5, orders: 30});
         else if (name === "theme") themeName = String(value);
         else if (name === "status") statusText = String(value);
+        else if (name === "notification" && value && value.message) toastHost.show(value.message, value.level);
         else if (name === "page") page = String(value);
         else if (name === "fullscreen") fullscreen = Boolean(value);
     }
@@ -95,7 +100,7 @@ ApplicationWindow {
     }
 
     function pageIndex(name) {
-        const names = ["dashboard", "orders", "journal", "optimizer", "controls", "monitor"]
+        const names = ["dashboard", "orders", "journal", "optimizer", "controls", "indicators", "monitor", "settings"]
         const index = names.indexOf(name)
         return index < 0 ? 0 : index
     }
@@ -103,10 +108,24 @@ ApplicationWindow {
     Theme {
         id: theme
         dark: root.themeName === "dark"
+        timeOffsetMinutes: root.systemData.offsetMinutes === undefined ? 480 : root.systemData.offsetMinutes
+        timeZoneLabel: root.systemData.timeZone === "local" ? "系统时区" : (root.systemData.timeZoneLabel || "UTC+08:00")
+        followSystemTime: root.systemData.timeZone === "local"
     }
 
     font.family: theme.fontFamily
     font.pixelSize: 13
+
+    ToastHost {
+        id: toastHost
+        parent: Overlay.overlay
+        ui: theme
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 96
+        anchors.rightMargin: 28
+        z: 10000
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -240,7 +259,9 @@ ApplicationWindow {
                             { page: "journal", label: "行情日志", icon: "journal" },
                             { page: "optimizer", label: "下单管理", icon: "allocation" },
                             { page: "controls", label: "控制面板", icon: "controls" },
-                            { page: "monitor", label: "实验功能", icon: "chart-line" }
+                            { page: "indicators", label: "指标参考", icon: "chart-line" },
+                            { page: "monitor", label: "实验功能", icon: "chart-line" },
+                            { page: "settings", label: "系统配置", icon: "controls" }
                         ]
                         delegate: Rectangle {
                             id: navItem
@@ -388,9 +409,23 @@ ApplicationWindow {
                         pageData: root.controlsData
                         bridge: root.backend
                     }
+                    IndicatorReferenceView {
+                        ui: theme
+                        pageData: root.indicatorsData
+                        bridge: root.backend
+                        connection: root.connection
+                    }
                     MonitorView {
                         ui: theme
                         pageData: root.monitorData
+                        bridge: root.backend
+                    }
+                    SystemSettingsView {
+                        ui: theme
+                        systemData: root.systemData
+                        refreshIntervals: root.refreshIntervals
+                        themeName: root.themeName
+                        fullscreen: root.fullscreen
                         bridge: root.backend
                     }
                 }
@@ -398,7 +433,7 @@ ApplicationWindow {
                 Rectangle {
                     anchors.fill: parent
                     z: 2
-                    visible: root.connection.locked === true
+                    visible: root.connection.locked === true && root.page !== "settings"
                     color: theme.dark ? "#D80C1420" : "#DDF4F7FB"
                     radius: 14
 
@@ -522,6 +557,7 @@ ApplicationWindow {
             const seconds = Number(refreshSeconds.text);
             if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) {
                 refreshError.visible = true;
+                root.action("setRefreshInterval", {kind: kind, seconds: 0});
                 return;
             }
             refreshError.visible = false;

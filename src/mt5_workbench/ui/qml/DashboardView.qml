@@ -104,7 +104,7 @@ Item {
                             font.pixelSize: 12
                         }
                         Text {
-                            text: market.time ? "报价时间 " + market.time : "等待报价"
+                            text: market.time ? "报价时间 " + ui.formatTime(market.time, false) + " " + ui.timeZoneLabel : "等待报价"
                             color: ui.faint
                             font.family: ui.fontFamily
                             font.pixelSize: 11
@@ -199,7 +199,7 @@ Item {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            text: "最近 72 根 · MT5"
+                            text: "最近 72 根 · " + ui.timeZoneLabel
                             color: ui.muted
                             font.family: ui.fontFamily
                             font.pixelSize: 11

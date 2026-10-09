@@ -196,6 +196,48 @@ class QmlJournalTimelineTests(unittest.TestCase):
         self.assertEqual(self.bridge.state["journal"]["posts"], [])
         self.assertEqual(self.repo.list_posts(self.key).posts[0].replies, ())
 
+    def test_share_button_copies_the_complete_post_image_without_changing_drafts(self):
+        post_id = self.repo.create_post(self.key, "行情观察\n" + "长内容测试 " * 100, [self.image])
+        self.repo.create_reply(self.key, post_id, "后续观察", [self.image])
+        self.load_feed()
+        self.open_window()
+        self.bridge.perform("journalPasteImage", {})
+        drafts = self.bridge.state["journal"]["draftImages"]
+        self.app.clipboard().setText("old clipboard")
+        self.click(self.items("journalShare")[0])
+        shared = self.app.clipboard().image()
+        self.assertFalse(shared.isNull())
+        self.assertEqual(shared.width(), 1080)
+        self.assertGreater(shared.height(), 1300)
+        self.assertIn("已复制到剪贴板", self.bridge.state["status"])
+        self.assertEqual(self.bridge.state["journal"]["draftImages"], drafts)
+        self.assertTrue(Path(drafts[0]["path"]).is_file())
+        self.assertEqual(self.repo.list_posts(self.key).total, 1)
+        self.assertEqual(self.qml_warnings, [])
+
+    def test_share_failure_keeps_clipboard_when_attachment_is_missing(self):
+        self.repo.create_post(self.key, "观察", [self.image])
+        self.load_feed()
+        self.repo.list_posts(self.key).posts[0].images[0].unlink()
+        self.app.clipboard().setText("keep this")
+        self.bridge.perform("journalShare", {"postId": self.bridge.state["journal"]["posts"][0]["id"]})
+        self.assertEqual(self.app.clipboard().text(), "keep this")
+        self.assertIn("分享失败", self.bridge.state["status"])
+
+    def test_share_rejects_other_accounts_invalid_ids_and_changed_account(self):
+        other_id = self.repo.create_post((202, "test-server"), "other account")
+        own_id = self.repo.create_post(self.key, "own post")
+        self.load_feed()
+        self.app.clipboard().setText("keep this")
+        for post_id in (other_id, 0, "invalid", 999999):
+            with self.subTest(post_id=post_id):
+                self.bridge.perform("journalShare", {"postId": post_id})
+                self.assertEqual(self.app.clipboard().text(), "keep this")
+        self.api.current = SimpleNamespace(login=202, server="test-server", currency="USC")
+        self.bridge.perform("journalShare", {"postId": own_id})
+        self.assertEqual(self.app.clipboard().text(), "keep this")
+        self.assertEqual(self.bridge.state["journal"]["posts"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
