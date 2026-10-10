@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
     QMessageBox, QScrollArea, QStackedWidget, QTableWidget, QVBoxLayout, QWidget,
 )
 
-from mt5_workbench.config import DEFAULT_SYMBOL
+from mt5_workbench.config import DEFAULT_SYMBOL, state_directory
+from mt5_workbench.infrastructure.app_data import prepare_state_directory
 from mt5_workbench.domain.account_policy import is_usc_account
 from mt5_workbench.domain.position_optimizer import Optimization, optimize
 from mt5_workbench.infrastructure.journal_db import JournalRepository
@@ -46,12 +47,6 @@ from mt5_workbench.ui.theme import (
     THEMES, WINDOW_GUTTER,
     load_theme, save_theme, style_sheet,
 )
-
-
-def state_directory(kind: str) -> Path:
-    base = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
-            else Path(__file__).resolve().parents[3])
-    return base / "state" / kind
 
 
 class _JournalSyncCancelled(RuntimeError):
@@ -1320,6 +1315,11 @@ def main() -> int:
     args = parse_args()
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("MT5 黄金交易工作台")
+    try:
+        prepare_state_directory()
+    except (OSError, RuntimeError, sqlite3.Error) as exc:
+        QMessageBox.critical(None, "无法初始化本地数据", str(exc))
+        return 1
     window = MainWindow(args.symbol, args.terminal)
     window.show()
     return app.exec()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -12,10 +13,11 @@ from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from mt5_workbench.config import DEFAULT_SYMBOL
 from mt5_workbench import __version__
+from mt5_workbench.infrastructure.app_data import prepare_state_directory
 from mt5_workbench.ui.qml_trade_bridge import QmlTradingBridge
 
 
@@ -32,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.smoke_test:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
         os.environ["QT_QUICK_BACKEND"] = "software"
+        os.environ["MT5_WORKBENCH_DATA_DIR"] = str(Path(args.smoke_test).resolve() / "app-data")
     # Set the Qt Quick Controls style before loading any Controls QML type.
     QQuickStyle.setStyle("FluentWinUI3")
     app = QApplication.instance() or QApplication(sys.argv)
@@ -43,6 +46,14 @@ def main(argv: list[str] | None = None) -> int:
                 QFontDatabase.addApplicationFont(str(fonts / font))
     app.setApplicationName("MT5 黄金交易工作台")
     app.setApplicationVersion(__version__)
+    try:
+        prepare_state_directory(migrate=not bool(args.smoke_test))
+    except (OSError, RuntimeError, sqlite3.Error) as exc:
+        if args.smoke_test:
+            return 1
+        QMessageBox.critical(None, "无法初始化本地数据", "本地数据目录无法创建或旧数据迁移失败。\n"
+                             f"{exc}\n原数据已保留，请关闭旧版工作台后重试。")
+        return 1
     bridge = QmlTradingBridge(args.symbol, args.terminal,
                               **({"autoconnect": False, "start_timer": False,
                                   "journal_repository": object()} if args.smoke_test else {}))

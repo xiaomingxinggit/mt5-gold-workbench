@@ -85,7 +85,7 @@ MAX_CONTENT_WIDTH = 1760
 
 
 def theme_settings_path() -> Path:
-    """Use a writable ``state`` folder next to source or the packaged EXE."""
+    """Use the application's permanent per-user state directory."""
     return state_directory("ui_settings.json")
 
 

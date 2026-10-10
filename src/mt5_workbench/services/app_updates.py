@@ -74,7 +74,7 @@ def parse_release(payload: dict, current_version: str = __version__) -> dict:
         return result
     result.update(status="available", available=True,
                   downloadUrl=asset["browser_download_url"],
-                  message=f"发现新版本 {tag}，可下载新版 EXE。关闭程序后替换 EXE，并保留 state 文件夹。")
+                  message=f"发现新版本 {tag}，可下载新版 EXE。关闭程序后替换 EXE；日志和设置保存在用户数据目录。")
     return result
 
 

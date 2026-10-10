@@ -8,7 +8,6 @@ account/market check immediately before execution.
 from __future__ import annotations
 
 import sqlite3
-import sys
 import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimer
 
 from mt5_workbench.domain.account_policy import is_usc_account
+from mt5_workbench.config import state_directory
 from mt5_workbench.domain.position_optimizer import Optimization, money, optimize
 from mt5_workbench.services.account_controls import (
     close_request, execute_batch, load_targets,
@@ -38,9 +38,7 @@ from mt5_workbench.ui.qml_bridge import QmlBridge, _journal_post
 
 
 def _records_dir(kind: str) -> Path:
-    base = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
-            else Path(__file__).resolve().parents[3])
-    return base / "state" / kind
+    return state_directory(kind)
 
 
 def _plan_fields(payload: dict) -> dict[str, str]:

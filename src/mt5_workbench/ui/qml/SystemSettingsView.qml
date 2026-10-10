@@ -62,7 +62,7 @@ Item {
                     UiButton { objectName: "downloadUpdateButton"; ui: root.ui; text: "下载新版 EXE"; variant: "primary"; visible: root.updateData.available === true; onClicked: root.request("downloadUpdate") }
                 }
                 Text {
-                    text: "启动后自动检查正式 Release，每 6 小时复查。下载后关闭工作台，再替换 EXE；请完整保留旁边的 state 文件夹。"
+                    text: "启动后自动检查正式 Release，每 6 小时复查。下载后关闭工作台，再替换 EXE；日志和设置自动保存在用户数据目录，无需随 EXE 搬动。"
                     color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12
                     wrapMode: Text.WordWrap; Layout.fillWidth: true
                 }
@@ -180,6 +180,8 @@ Item {
                 SettingsInfoRow { ui: root.ui; label: "账户币种与换算"; value: (root.systemData.accountCurrency || "USC") + " · " + (root.systemData.currencyRatio || "100 USC = 1 USD") }
                 SettingsInfoRow { ui: root.ui; label: "本地数据目录"; value: root.systemData.stateDirectory || "—" }
                 SettingsInfoRow { ui: root.ui; label: "日志与图片目录"; value: root.systemData.journalDirectory || "—" }
+                UiButton { objectName: "openDataDirectoryButton"; ui: root.ui; text: "打开数据目录"; onClicked: root.request("openDataDirectory") }
+                Text { text: "用户数据目录由工作台自动创建，用于保存日志、图片、设置和交易执行记录。移动或升级 EXE 不影响这些数据。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 Text { text: "品种和 USC 账户规则为当前版本固定配置。客户端路径可在启动时通过 --terminal 指定；目录内容可选中复制。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.WordWrap }
             }
             Item { Layout.preferredHeight: 22 }

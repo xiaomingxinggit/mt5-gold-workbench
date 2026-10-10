@@ -45,6 +45,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
+          MT5_WORKBENCH_DATA_DIR: ${{ runner.temp }}/mt5-workbench-tests
         run: |
           ./.venv/Scripts/python.exe -m unittest discover -s tests
           if ($LASTEXITCODE -ne 0) { throw "Tests failed" }

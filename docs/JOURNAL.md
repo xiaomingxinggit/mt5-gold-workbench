@@ -26,10 +26,10 @@
 
 “记录轨迹”借鉴贡献日历：选择当前年或该账户曾发帖的年份，查看该日历年的发帖热力图。每个方块代表一个本地日，颜色表示当天发布的**帖子数**，不是成交次数或收益；闰年包含 2 月 29 日，当前年份显示至今天。悬停可查看日期和数量；上方的累计帖子、过去 30 天帖子数和过去 365 天活跃天数保持原统计范围，不随年份切换。[GitHub 贡献日历参考](https://docs.github.com/en/account-and-profile/concepts/contributions-on-your-profile)。
 
-数据库和图片都位于程序旁的 `state/journal/`：
+数据库和图片都位于软件自动创建的 `%LOCALAPPDATA%/MT5Workbench/state/journal/`：
 
 ```text
-state/journal/
+%LOCALAPPDATA%/MT5Workbench/state/journal/
 ├── journal.sqlite3
 └── images/
 ```

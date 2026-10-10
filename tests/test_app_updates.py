@@ -25,7 +25,10 @@ from mt5_workbench.ui.update_controller import UpdateController
 from pathlib import Path
 
 
-def release(version="0.2.1"):
+def release(version=None):
+    if version is None:
+        major, minor, patch = updates.version_tuple(__version__)
+        version = f"{major}.{minor}.{patch + 1}"
     return {"tag_name": "v" + version, "draft": False, "prerelease": False,
             "html_url": updates.RELEASES_URL + "/tag/v" + version,
             "body": "新增功能\n修复问题",
@@ -133,6 +136,10 @@ class UpdateUiTests(unittest.TestCase):
             bridge.perform("downloadUpdate", {"url": "https://example.com"})
             self.assertEqual(browser.call_args.args[0].toString(), release()["assets"][0]["browser_download_url"])
         self.assertEqual(api.mock_calls, [])
+        with patch("mt5_workbench.ui.qml_bridge.QDesktopServices.openUrl", return_value=True) as browser:
+            bridge._clear_session("账户锁定", locked=True)
+            bridge.perform("openDataDirectory", {})
+            self.assertTrue(browser.call_args.args[0].isLocalFile())
 
     def test_automatic_checks_notify_once_and_failures_stay_quiet(self):
         checker = Mock(return_value=updates.parse_release(release()))

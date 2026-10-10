@@ -1138,6 +1138,10 @@ class QmlBridge(QObject):
     def perform(self, action: str, payload: dict[str, Any]) -> None:
         """Dispatch a QML action. A subclass owns every account mutation."""
         values = dict(payload or {})
+        if action == "openDataDirectory":
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(state_directory().resolve()))):
+                self._set_status("无法打开本地数据目录，请复制目录路径后在资源管理器中打开", level="error")
+            return
         if action == "checkUpdates":
             self.updates.check(manual=True)
             return
