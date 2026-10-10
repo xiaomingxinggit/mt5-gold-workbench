@@ -270,7 +270,8 @@ class MainWindow(QMainWindow):
                 ("journal", "行情日志", "journal"),
                 ("optimizer", "下单管理", "allocation"),
                 ("controls", "控制面板", "controls"),
-                ("monitor", "实验功能", "chart-line")):
+                ("monitor", "行情监测", "chart-line"),
+                ("experimental", "实验功能", "chart-line")):
             control = button(title, self.theme, graphic, "nav")
             control.setCheckable(True)
             control.clicked.connect(lambda _checked=False, page=key: self.show_page(page))
@@ -297,10 +298,12 @@ class MainWindow(QMainWindow):
         self.optimizer = OptimizerPage(self.palette, self.theme)
         self.controls = ControlsPage(self.symbol_name, self.palette)
         self.monitor = EmaMonitorPage(self.symbol_name, self.palette)
+        self.experimental = label("暂未开放", kind="muted", size=24)
+        self.experimental.setAlignment(Qt.AlignmentFlag.AlignCenter)
         for key, page in (("dashboard", self.dashboard), ("orders", self.order_page),
                            ("journal", self.journal),
                            ("optimizer", self.optimizer), ("controls", self.controls),
-                           ("monitor", self.monitor)):
+                           ("monitor", self.monitor), ("experimental", self.experimental)):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -381,6 +384,7 @@ class MainWindow(QMainWindow):
         graphics = {
             "dashboard": "dashboard", "orders": "orders", "journal": "journal",
             "optimizer": "allocation", "controls": "controls", "monitor": "chart-line",
+            "experimental": "chart-line",
         }
         for key in keys:
             selected = "-active" if self.current_page == key else ""

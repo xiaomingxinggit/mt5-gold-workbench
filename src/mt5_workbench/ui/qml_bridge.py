@@ -53,10 +53,10 @@ from mt5_workbench.ui.update_controller import UpdateController
 from mt5_workbench.services.app_updates import RELEASES_URL, trusted_release_url
 
 
-PAGE_NAMES = frozenset({"dashboard", "orders", "journal", "optimizer", "controls", "indicators", "monitor", "settings"})
+PAGE_NAMES = frozenset({"dashboard", "orders", "journal", "optimizer", "controls", "indicators", "monitor", "experimental", "settings"})
 _NOTIFICATION_SECTIONS = {
     "dashboard": "总览看板", "overview": "交易概览", "journal": "行情日志",
-    "controls": "控制面板", "monitor": "实验行情", "basicOrder": "基础限价单",
+    "controls": "控制面板", "monitor": "行情监测", "basicOrder": "基础限价单",
     "market": "行情报价",
     "indicators": "指标参考",
 }
@@ -766,7 +766,7 @@ class QmlBridge(QObject):
                                       "journal": "行情日志已更新",
                                       "books": "当前持仓与挂单已更新",
                                       "indicators": "指标参考已更新",
-                                      "monitor": "实验行情已更新"}.get(kind, "已更新"),
+                                      "monitor": "行情监测已更新"}.get(kind, "已更新"),
                                      notify=manual_refresh)
         if not self._jobs and not self._result_waiting:
             self._results_timer.stop()

@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    objectName: "monitorView"
     property var ui
     property var pageData: ({})
     property var bridge
@@ -44,7 +45,7 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 5
-                    Text { text: "实验功能"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 28; font.weight: Font.DemiBold }
+                    Text { text: "行情监测"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 28; font.weight: Font.DemiBold }
                     Text { text: "XAUUSDc · M1 EMA 7 / 14 / 30 / 60 行情监听"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 14 }
                 }
                 Rectangle {
@@ -52,7 +53,7 @@ Item {
                     implicitHeight: 28
                     radius: 8
                     color: root.ui.accentSoft
-                    Text { id: badgeText; anchors.centerIn: parent; text: "实验 · 只读"; color: root.ui.accent; font.family: root.ui.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
+                    Text { id: badgeText; anchors.centerIn: parent; text: "只读"; color: root.ui.accent; font.family: root.ui.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
                 }
                 UiButton { ui: root.ui; text: "立即刷新"; variant: "secondary"; onClicked: root.request("monitorRefresh", {}) }
             }

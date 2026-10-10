@@ -102,7 +102,7 @@ ApplicationWindow {
     }
 
     function pageIndex(name) {
-        const names = ["dashboard", "orders", "journal", "optimizer", "controls", "indicators", "monitor", "settings"]
+        const names = ["dashboard", "orders", "journal", "optimizer", "controls", "indicators", "monitor", "experimental", "settings"]
         const index = names.indexOf(name)
         return index < 0 ? 0 : index
     }
@@ -262,7 +262,8 @@ ApplicationWindow {
                             { page: "optimizer", label: "下单管理", icon: "allocation" },
                             { page: "controls", label: "控制面板", icon: "controls" },
                             { page: "indicators", label: "指标参考", icon: "chart-line" },
-                            { page: "monitor", label: "实验功能", icon: "chart-line" },
+                            { page: "monitor", label: "行情监测", icon: "chart-line" },
+                            { page: "experimental", label: "实验功能", icon: "chart-line" },
                             { page: "settings", label: "系统配置", icon: "controls" }
                         ]
                         delegate: Rectangle {
@@ -421,6 +422,16 @@ ApplicationWindow {
                         ui: theme
                         pageData: root.monitorData
                         bridge: root.backend
+                    }
+                    Item {
+                        objectName: "experimentalView"
+                        Text {
+                            anchors.centerIn: parent
+                            text: "暂未开放"
+                            color: theme.muted
+                            font.family: theme.fontFamily
+                            font.pixelSize: 24
+                        }
                     }
                     SystemSettingsView {
                         ui: theme

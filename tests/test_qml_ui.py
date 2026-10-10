@@ -37,7 +37,7 @@ class QmlUiTests(unittest.TestCase):
         QQuickStyle.setStyle("FluentWinUI3")
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_seven_pages_theme_and_window_size_load_without_mt5(self):
+    def test_all_pages_theme_and_window_size_load_without_mt5(self):
         bridge = QmlTradingBridge(autoconnect=False, start_timer=False,
                                   journal_repository=object())
         bridge._set_state(theme="light")
@@ -55,6 +55,17 @@ class QmlUiTests(unittest.TestCase):
                 bridge.perform("navigate", {"page": page})
                 self.app.processEvents()
                 self.assertEqual(window.property("page"), page)
+            monitor_view = window.findChild(QQuickItem, "monitorView")
+            experimental_view = window.findChild(QQuickItem, "experimentalView")
+            self.assertIsNotNone(monitor_view)
+            self.assertIsNotNone(experimental_view)
+            for page in ("monitor", "experimental"):
+                bridge.perform("navigate", {"page": page})
+                self.app.processEvents()
+                self.assertEqual(monitor_view.isVisible(), page == "monitor")
+                self.assertEqual(experimental_view.isVisible(), page == "experimental")
+            self.assertEqual(len(experimental_view.childItems()), 1)
+            self.assertEqual(experimental_view.childItems()[0].property("text"), "暂未开放")
             bridge.perform("navigate", {"page": "optimizer"})
             self.app.processEvents()
             entry_view = window.findChild(QQuickItem, "orderEntryView")

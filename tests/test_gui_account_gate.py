@@ -52,7 +52,7 @@ class GuiAccountGateTests(unittest.TestCase):
 
     def test_sidebar_names_stay_consistent_when_resized(self):
         window = self.new_window()
-        expected = ["总览看板", "交易概览", "行情日志", "下单管理", "控制面板", "实验功能"]
+        expected = ["总览看板", "交易概览", "行情日志", "下单管理", "控制面板", "行情监测", "实验功能"]
         for width, height in ((1200, 800), (2560, 1440)):
             window.resize(width, height)
             self.qt_app.processEvents()
@@ -130,9 +130,9 @@ class GuiAccountGateTests(unittest.TestCase):
             self.assertIsNotNone(window.account_lock)
             read_history.assert_not_called()
 
-    def test_monitor_is_last_page_and_read_only_account_gated(self):
+    def test_monitor_is_separate_from_placeholder_and_read_only_account_gated(self):
         window = self.new_window()
-        self.assertEqual(list(window.nav)[-1], "monitor")
+        self.assertEqual(list(window.nav)[-2:], ["monitor", "experimental"])
         window.connected = True
         window.account = account("USC")
         snapshot = SimpleNamespace(
@@ -150,6 +150,11 @@ class GuiAccountGateTests(unittest.TestCase):
             read.assert_called_once_with("XAUUSDc", tolerance_points=5.0)
             self.assertEqual(window.monitor.state_value.text(), "等待 EMA 聚拢")
             self.assertFalse(window.nav["monitor"].icon().isNull())
+            window.show_page("experimental")
+            self.assertEqual(window.stack.currentWidget(), window.pages["experimental"])
+            self.assertEqual(window.experimental.text(), "暂未开放")
+            self.assertFalse(window.nav["experimental"].icon().isNull())
+            self.assertEqual(read.call_count, 1)
 
         with (
             patch.object(qt_gui.mt5, "terminal_info", return_value=SimpleNamespace(connected=True)),

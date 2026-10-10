@@ -114,9 +114,9 @@ class EmaMonitorPage(QWidget):
 
         heading = QHBoxLayout()
         heading.setSpacing(12)
-        heading.addWidget(_label("EMA 行情监听", role="page-title"))
+        heading.addWidget(_label("行情监测", role="page-title"))
         heading.addStretch(1)
-        self.readonly_badge = _label("实验功能 · 只读", role="badge")
+        self.readonly_badge = _label("只读", role="badge")
         heading.addWidget(self.readonly_badge)
         self.refresh_button = QPushButton("立即刷新")
         self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
