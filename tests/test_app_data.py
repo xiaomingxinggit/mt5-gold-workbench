@@ -34,7 +34,7 @@ class AppDataTests(unittest.TestCase):
 
     def test_new_user_gets_complete_directories_without_legacy_data(self):
         result = self.prepare()
-        self.assertEqual(result, self.destination)
+        self.assertEqual(result, self.destination.resolve())
         for name in app_data.SUBDIRECTORIES:
             self.assertTrue((result / name).is_dir())
         self.assertEqual(json.loads((result / "storage.json").read_text("utf-8"))["migratedFrom"], "")
