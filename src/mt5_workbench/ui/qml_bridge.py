@@ -26,7 +26,7 @@ from uuid import uuid4
 
 import MetaTrader5 as mt5
 from PySide6.QtCore import QObject, Property, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QFileDialog
 
 from mt5_workbench.config import (
@@ -49,6 +49,8 @@ from mt5_workbench.services.journal_positions import (
 from mt5_workbench.services.order_analytics import load_order_analytics
 from mt5_workbench.ui.journal_share import render_journal_share
 from mt5_workbench.ui.theme import load_theme, save_theme
+from mt5_workbench.ui.update_controller import UpdateController
+from mt5_workbench.services.app_updates import RELEASES_URL, trusted_release_url
 
 
 PAGE_NAMES = frozenset({"dashboard", "orders", "journal", "optimizer", "controls", "indicators", "monitor", "settings"})
@@ -360,6 +362,10 @@ class QmlBridge(QObject):
         self._state["refreshIntervals"] = _load_refresh_intervals()
         self._state["system"] = system_snapshot(load_time_zone(), terminal_path, symbol_name)
         self._closing = False
+        self.updates = UpdateController(self)
+        self._state["updates"] = self.updates.state
+        self.updates.changed.connect(lambda value: self._set_state(updates=value))
+        self.updates.notice.connect(lambda message, level: self._set_status(message, level=level))
         self._reconnect_pending = False
         self._jobs: dict[str, _Job] = {}
         self._generations: dict[str, int] = {}
@@ -463,6 +469,7 @@ class QmlBridge(QObject):
         clean["fullscreen"] = self._state["fullscreen"]
         clean["refreshIntervals"] = self._state["refreshIntervals"]
         clean["system"] = self._state["system"]
+        clean["updates"] = self._state["updates"]
         clean["connection"] = {
             "connected": False, "locked": locked, "message": message,
             "currentAccount": (_account_map(current_account)
@@ -1131,6 +1138,18 @@ class QmlBridge(QObject):
     def perform(self, action: str, payload: dict[str, Any]) -> None:
         """Dispatch a QML action. A subclass owns every account mutation."""
         values = dict(payload or {})
+        if action == "checkUpdates":
+            self.updates.check(manual=True)
+            return
+        if action in {"openRelease", "downloadUpdate"}:
+            download = action == "downloadUpdate"
+            url = self._state["updates"].get("downloadUrl" if download else "releaseUrl", "")
+            if download and not self._state["updates"].get("available"):
+                return
+            if url == RELEASES_URL or trusted_release_url(url, download=download):
+                if not QDesktopServices.openUrl(QUrl(url)):
+                    self._set_status("无法打开浏览器，请检查系统默认浏览器设置", level="error")
+            return
         if action == "reconnect":
             self.connect()
             return
@@ -1306,6 +1325,7 @@ class QmlBridge(QObject):
     def shutdown(self) -> None:
         """Stop timers and discard background results during app teardown."""
         self._closing = True
+        self.updates.close()
         self._timer.stop()
         self._results_timer.stop()
         self._cancel_jobs()

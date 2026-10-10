@@ -40,6 +40,7 @@ ApplicationWindow {
     property var monitorData: ({})
     property var indicatorsData: ({})
     property var systemData: ({})
+    property var updateData: ({})
     property var confirmation: ({})
     property var refreshIntervals: ({quote: 1, positions: 5, orders: 30})
     property string themeName: "light"
@@ -62,6 +63,7 @@ ApplicationWindow {
         else if (name === "monitor") monitorData = value || ({});
         else if (name === "indicators") indicatorsData = value || ({});
         else if (name === "system") systemData = value || ({});
+        else if (name === "updates") updateData = value || ({});
         else if (name === "confirmation") confirmation = value || ({});
         else if (name === "refreshIntervals") refreshIntervals = value || ({quote: 1, positions: 5, orders: 30});
         else if (name === "theme") themeName = String(value);
@@ -423,6 +425,7 @@ ApplicationWindow {
                     SystemSettingsView {
                         ui: theme
                         systemData: root.systemData
+                        updateData: root.updateData
                         refreshIntervals: root.refreshIntervals
                         themeName: root.themeName
                         fullscreen: root.fullscreen

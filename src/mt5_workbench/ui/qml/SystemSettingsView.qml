@@ -7,6 +7,7 @@ Item {
     objectName: "systemSettingsView"
     property var ui
     property var systemData: ({})
+    property var updateData: ({})
     property var refreshIntervals: ({quote: 1, positions: 5, orders: 30})
     property string themeName: "light"
     property bool fullscreen: false
@@ -37,6 +38,41 @@ Item {
                 spacing: 5
                 Text { text: "系统配置"; color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 28; font.weight: Font.DemiBold }
                 Text { text: "管理工作台的全局设置，修改后立即生效并自动保存。"; color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 14; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            }
+            UiCard {
+                objectName: "appUpdatesCard"
+                ui: root.ui
+                Layout.fillWidth: true
+                spacing: 14
+                SectionHeading { ui: root.ui; title: "版本与更新" }
+                SettingsInfoRow { ui: root.ui; label: "当前版本"; value: root.updateData.currentVersion || "—"; valueName: "appCurrentVersion" }
+                SettingsInfoRow { ui: root.ui; label: "远程正式版本"; value: root.updateData.latestVersion || "—" }
+                SettingsInfoRow { ui: root.ui; label: "上次检查"; value: root.updateData.checkedAt ? root.ui.formatTime(root.updateData.checkedAt) : "尚未检查" }
+                Text {
+                    objectName: "appUpdateMessage"
+                    text: root.updateData.message || ""
+                    color: root.updateData.available ? root.ui.accent : root.ui.muted
+                    font.family: root.ui.fontFamily; font.pixelSize: 13
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                }
+                RowLayout {
+                    spacing: 12
+                    UiButton { objectName: "checkUpdatesButton"; ui: root.ui; text: "检查更新"; busy: root.updateData.busy === true; enabled: !busy; onClicked: root.request("checkUpdates") }
+                    UiButton { ui: root.ui; text: "发布页面"; onClicked: root.request("openRelease") }
+                    UiButton { objectName: "downloadUpdateButton"; ui: root.ui; text: "下载新版 EXE"; variant: "primary"; visible: root.updateData.available === true; onClicked: root.request("downloadUpdate") }
+                }
+                Text {
+                    text: "启动后自动检查正式 Release，每 6 小时复查。下载后关闭工作台，再替换 EXE；请完整保留旁边的 state 文件夹。"
+                    color: root.ui.muted; font.family: root.ui.fontFamily; font.pixelSize: 12
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                }
+                Text {
+                    visible: !!root.updateData.releaseNotes
+                    text: root.updateData.releaseNotes || ""
+                    textFormat: Text.PlainText
+                    color: root.ui.text; font.family: root.ui.fontFamily; font.pixelSize: 13
+                    wrapMode: Text.Wrap; Layout.fillWidth: true
+                }
             }
             UiCard {
                 objectName: "systemTimeCard"

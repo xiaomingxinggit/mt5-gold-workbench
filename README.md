@@ -158,10 +158,56 @@ ATR 是行情波动参考，不是每日可赚利润；实际收益还取决于�
 
 在项目根目录的 PowerShell 中运行 `powershell -ExecutionPolicy Bypass -File .\build.ps1`。
 脚本会安装 `requirements.txt` 和 `requirements-build.txt` 中的依赖，生成
-`dist/MT5Workbench-Windows-x64.zip`。解压后运行 `MT5Workbench.exe`；
+单文件 `dist/MT5Workbench.exe`，以及包含 EXE 和使用说明的
+`dist/MT5Workbench-Windows-x64.zip`、校验文件 `dist/SHA256SUMS.txt`。
+可直接双击 EXE，或解压 ZIP 后运行；
 Python、MetaTrader5 Python 包、NumPy 和 PySide6 图形界面运行库均已包含在包内。
 仍需在目标电脑安装并登录 MetaTrader 5 客户端。请保留程序旁的 `state/` 目录，
 其中存有交易执行记录、行情日志和界面主题偏好。完整使用说明见压缩包内的 `README-package.txt`。
+
+EXE 包含运行依赖，第一次启动会在系统临时目录解包，因此比源码启动稍慢。
+用户数据仍保存在 **EXE 旁的 `state/`**，不会保存在临时解包目录。
+发布包不包含个人数据。从源码版切换时，将 EXE 放到项目根目录，与原有 `state/`
+并列即可沿用日志和设置；或将 EXE 和完整 `state/` 一起复制到新目录。
+
+## 检测更新与自动发布
+
+后续开发统一在 `dev` 分支进行；`main` 保留稳定发布代码。发布时将测试通过的 `dev`
+合并到 `main`，从 `main` 创建版本标签，完成后切回 `dev` 继续开发。
+
+“系统配置 → 版本与更新”展示版本、检查时间、发布说明，提供“检查更新”、
+“发布页面”和发现新版时的“下载新版 EXE”。启动 3 秒后在后台检查一次，每 6 小时复查；
+未连接 MT5、账户锁定时仍可使用。自动检查仅在发现新版本时提示，网络问题显示在更新卡片中；
+手动检查会提示结果。下载通过默认浏览器进行，关闭工作台后再替换 EXE，并完整保留 `state/`。
+
+程序访问公开仓库 `xiaomingxinggit/mt5-gold-workbench` 的 GitHub Releases API，
+比较正式 Release 的 `v主版本.次版本.修订版本` 与应用版本。普通 commit、草稿和预发布
+不会触发版本提示；新版缺少已上传完成的 `MT5Workbench.exe` 时只提示等待打包完成。
+检测不需要登录，不包含 GitHub Token，也不会修改本地文件。更换远程仓库时需同步修改
+`src/mt5_workbench/services/app_updates.py` 中的 `REPOSITORY` 并重新打包。
+
+已提供 [.github/workflows/release.yml](.github/workflows/release.yml)。将本次代码与工作流推送到
+远程仓库后，确认仓库的 **Settings → Actions → General** 允许 GitHub Actions；工作流声明
+`contents: write`，使用内置 `GITHUB_TOKEN` 创建 Release，无需新增 Secrets。
+如果组织策略禁止写入，需要仓库管理员允许该工作流发布。
+
+后续发布流程：
+
+1. 修改 `src/mt5_workbench/__init__.py` 的 `__version__`（例如 `0.2.1`），更新说明，提交并推送代码。
+2. 为该提交创建同版本标签，并推送：
+
+   ```powershell
+   git tag v0.2.1
+   git push origin v0.2.1
+   ```
+
+3. GitHub Actions 在 Windows x64 / Python 3.12 上运行离线测试、打包、启动 EXE 验证 QML，
+   全部成功后自动创建正式 Release，附带 EXE、ZIP 和 SHA-256 校验文件。
+4. 旧版 APP 下一次检查时识别该 Release，并提供新版下载。标签版本与应用版本不一致会阻止发布。
+
+当前版本为 `0.2.0`，首次正式发布可使用 `v0.2.0`。
+也可在 Actions 页面手动运行该工作流，只生成可下载的构建产物，不创建 Release。
+自动打包是便利功能；手动创建正式 Release 并上传同名 EXE，也能被 APP 识别。
 
 ## 下单管理（限价单）
 
