@@ -1,7 +1,7 @@
 # MT5 工作台桌面应用整理计划
 
-> 此文档记录最初的 QWidget 工程整理基线。当前开发分支 `codex/qml-ui-redesign`
-> 已将默认入口切换为 `ui/qml_app.py`，六页由 `ui/qml/` 渲染；只读状态桥接见
+> 此文档记录最初的 QWidget 工程整理基线及分阶段目标，不是当前实现清单。
+> 当前开发统一在 `dev`，默认入口为 `ui/qml_app.py`，九页由 `ui/qml/` 渲染；只读状态桥接见
 > `ui/qml_bridge.py`，确认后的写操作见 `ui/qml_trade_bridge.py`。旧 QWidget
 > 文件仍在仓库中，但不再由默认入口加载。新界面仍需在真实 Windows 显示器上
 > 验收字号、DPI、2K 布局和目标终端的响应速度。
