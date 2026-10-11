@@ -2,9 +2,17 @@
 
 - Perform all development, fixes, and commits on `dev`. Do not create additional development branches unless the user explicitly requests one.
 - `main` is the stable release branch. Promote tested changes from `dev` to `main` for a release; do not develop directly on `main`.
+- Build every release artifact from committed `main` code. If `dev` is ahead, validate and merge the intended changes into `main` before packaging; never publish a build taken directly from `dev` or an uncommitted checkout. CI may check out the release tag created from that `main` commit.
 - Create version tags from `main`; the tag must match `mt5_workbench.__version__` (for example, `v0.2.0`).
 - Keep the local working checkout on `dev` after publishing a release.
 - Never commit `state/`, account records, screenshots containing account data, or generated build artifacts.
+
+# 发布判断分工
+
+- 用户指定专门负责发布判断的助手或会话，默认职责是评估当前项目是否需要发布；其他开发助手仍按各自任务工作。
+- 判断时比较 `dev` 与最近正式发布版本，结合用户可见的功能、缺陷修复、交易安全、兼容性和发布验证证据，区分“有发布必要”与“已具备发布条件”。仅内部整理或文档变更通常不单独触发运行版发布。
+- 结论使用“建议发布”“暂不需要发布”或“需要发布但尚未就绪”，说明依据、紧急程度及缺失的验证；未验证的项目不得写成通过。
+- 发布判断本身不授权开发修复、修改版本、合并分支、创建标签或推送发布；用户另有明确指示时再执行。验证与发布要求见 [开发与发布指南](docs/DEVELOPMENT.md)。
 
 # 工程上下文
 

@@ -78,9 +78,11 @@ Get-Content -Raw build\source-smoke\result.json
 
 ## 构建 Windows 运行版
 
-先准备上述虚拟环境，再执行：
+用于发布的运行版统一从已提交的 `main` 代码打包。如果 `dev` 有待发布改动，先完成验证并按下一节的流程合并到 `main`，再打包；不得直接发布从 `dev` 或含未提交改动的工作区生成的产物。
+先准备上述虚拟环境，确认待发布提交已进入 `main`、工作区干净，再执行：
 
 ```powershell
+git switch main
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
@@ -102,11 +104,12 @@ Get-Content -Raw build\frozen-smoke\result.json
 
 ## 发布版本
 
-发布时将测试通过的 `dev` 合并到 `main`，从 `main` 创建版本标签，完成后本地回到 `dev`。不创建额外开发分支。
+所有发布都遵循：验证 `dev` → 合并到 `main` → 从 `main` 的发布提交打包 → 验证产物并发布 → 本地回到 `dev`。自动发布从该 `main` 提交创建的版本标签检出并打包。不创建额外开发分支。
+`dev` 领先 `main` 的提交数量仅表示存在未合并改动，不单独决定是否需要发布；决定发布后，必须先合并再打包。
 
 1. 在 `dev` 修改 `src/mt5_workbench/__init__.py` 的 `__version__`，同步 `README-package.txt` 的版本及相关使用说明，完成测试并提交。
-2. 将已测试的 `dev` 合并到 `main`，核对准备发布的代码与版本。
-3. 从 `main` 创建与应用版本完全相同的 `v主版本.次版本.修订版本` 标签，再推送分支与标签。
+2. 将已测试的 `dev` 合并到 `main`，核对准备发布的代码与版本，确认工作区干净。需要本地打包时，此时从 `main` 构建并验证运行版。
+3. 从 `main` 创建与应用版本完全相同的 `v主版本.次版本.修订版本` 标签，再推送分支与标签；自动发布工作流从该标签指向的 `main` 提交构建产物。
 4. 查看 GitHub Actions 的离线测试、构建和冻结版启动结果，核对正式 Release 的附件。
 5. 切回 `dev` 继续开发。
 
@@ -122,7 +125,7 @@ git switch dev
 ```
 
 [发布工作流](../.github/workflows/release.yml)使用 Windows x64 / Python 3.12，核对标签与应用版本，运行离线测试、打包及冻结版 QML 启动验证；全部成功后发布 EXE、ZIP 与校验文件。
-工作流使用内置 `GITHUB_TOKEN` 和 `contents: write`，不需要新增 Secrets；仓库 Actions 或组织策略需允许该工作流发布。手动触发只生成构建产物，不创建 Release。
+工作流使用内置 `GITHUB_TOKEN` 和 `contents: write`，不需要新增 Secrets；仓库 Actions 或组织策略需允许该工作流发布。手动触发时选择 `main`，只生成构建产物，不创建 Release。本地构建及发布完成后切回 `dev`。
 
 ## 版本检测的约定
 

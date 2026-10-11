@@ -1,10 +1,12 @@
 MT5 黄金交易工作台（Windows x64）
 
-版本：0.2.1（单文件 EXE）
+版本：0.2.2（单文件 EXE）
 
 1. 将 MT5Workbench.exe 放到任意合适的文件夹；如果下载的是压缩包，请先解压，不要直接在压缩包内运行。
 2. 先启动并登录 MetaTrader 5 客户端。
 3. 双击 MT5Workbench.exe 启动。本包已包含 Python、MetaTrader5 Python 包、NumPy 和图形界面所需运行库，无需再安装 Python 包。
+
+侧栏“行情监测”提供 XAUUSDc 的 M1 EMA 7 / 14 / 30 / 60 只读监听；“实验功能”单独保留为“暂未开放”页面。行情监测不会自动下单。
 
 如果电脑上有多个 MT5 客户端，可在 PowerShell 中运行：
   .\MT5Workbench.exe --terminal "C:\Program Files\MetaTrader 5\terminal64.exe"
