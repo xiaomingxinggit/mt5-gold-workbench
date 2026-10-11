@@ -151,6 +151,18 @@ ApplicationWindow {
 
                 RowLayout {
                     spacing: 10
+                    Image {
+                        objectName: "applicationLogo"
+                        property bool ready: status === Image.Ready
+                        source: "../resources/branding/dragon-" + (theme.dark ? "gold" : "ink") + ".svg"
+                        sourceSize.width: 40
+                        sourceSize.height: 40
+                        Layout.preferredWidth: 36
+                        Layout.preferredHeight: 36
+                        Layout.alignment: Qt.AlignVCenter
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
+                    }
                     Text {
                         text: "MT5"
                         color: theme.text

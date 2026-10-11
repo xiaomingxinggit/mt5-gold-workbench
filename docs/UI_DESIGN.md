@@ -18,7 +18,7 @@ Repeater/ListView 的 delegate 一旦声明 required 属性，使用 `index` 时
 
 全局字体为 Microsoft YaHei UI，系统未安装时由 Qt 回退。文本统一用像素字号：辅助 11–12、正文 13–14、分区标题 16–18、页面标题 28、关键数值 22–28。标签和正文优先常规字重，导航选中项、标题和关键数值使用 DemiBold。手数、价格、资金和时间明确标注单位或数据口径；缺失值用“—”，加载中与过期报价必须有文字状态。USC 账户中 **100 USC = 1 USD**，美元风险要显式标为 USD。
 
-界面不使用品牌 LOGO。操作图标的 SVG 源文件位于 [`ui/resources/icons/svg/`](../src/mt5_workbench/ui/resources/icons/README.md)，按明暗主题加载；图标与按钮文字配对使用。卡片采用表面色、细边框和圆角，不叠加厚重阴影。滚动条只在内容超出时出现。
+顶部栏使用 36 px 的抽象龙首标志，深色主题使用古金色，浅色主题使用墨色；EXE、窗口与任务栏使用金色龙首配墨黑底图标。品牌 SVG 母版与 ICO 位于 [`ui/resources/branding/`](../src/mt5_workbench/ui/resources/branding/README.md)。操作图标的 SVG 源文件位于 [`ui/resources/icons/svg/`](../src/mt5_workbench/ui/resources/icons/README.md)，按明暗主题加载；图标与按钮文字配对使用。卡片采用表面色、细边框和圆角，不叠加厚重阴影。滚动条只在内容超出时出现。
 
 ## 尺寸与布局
 

@@ -9,8 +9,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, QUrl
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtCore import QObject, QTimer, QUrl
+from PySide6.QtGui import QFontDatabase, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -46,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
                 QFontDatabase.addApplicationFont(str(fonts / font))
     app.setApplicationName("MT5 黄金交易工作台")
     app.setApplicationVersion(__version__)
+    app.setWindowIcon(QIcon(str(Path(__file__).resolve().parent /
+                               "resources/branding/app-icon.ico")))
     try:
         prepare_state_directory(migrate=not bool(args.smoke_test))
     except (OSError, RuntimeError, sqlite3.Error) as exc:
@@ -78,7 +80,11 @@ def main(argv: list[str] | None = None) -> int:
             app.processEvents()
             screenshot = window.grabWindow()
             image_ok = not screenshot.isNull() and screenshot.save(str(output / "settings.png"))
-            result = {"ok": bool(image_ok and not warnings), "version": __version__,
+            logo = window.findChild(QObject, "applicationLogo")
+            branding_ok = (not app.windowIcon().isNull() and not window.icon().isNull()
+                           and logo is not None and logo.property("ready"))
+            result = {"ok": bool(image_ok and branding_ok and not warnings), "version": __version__,
+                      "brandingOk": branding_ok,
                       "warnings": warnings, "stateDirectory": bridge.state["system"]["stateDirectory"]}
             (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             app.exit(0 if result["ok"] else 1)

@@ -64,6 +64,7 @@ jobs:
           path: |
             dist/MT5Workbench.exe
             dist/MT5Workbench-Windows-x64.zip
+            dist/MT5Workbench-Logo.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
       - name: Publish release with verified binaries
@@ -71,5 +72,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME ./dist/MT5Workbench.exe ./dist/MT5Workbench-Windows-x64.zip ./dist/SHA256SUMS.txt --verify-tag --generate-notes --title "MT5 Workbench $env:GITHUB_REF_NAME"
+          gh release create $env:GITHUB_REF_NAME ./dist/MT5Workbench.exe ./dist/MT5Workbench-Windows-x64.zip ./dist/MT5Workbench-Logo.zip ./dist/SHA256SUMS.txt --verify-tag --generate-notes --title "MT5 Workbench $env:GITHUB_REF_NAME"
           if ($LASTEXITCODE -ne 0) { throw "Release publication failed" }

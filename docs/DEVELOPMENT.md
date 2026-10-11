@@ -90,7 +90,13 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist/MT5Workbench.exe`：包含 Python、MetaTrader5、NumPy 与 PySide6 运行库的单文件 EXE。
 - `dist/MT5Workbench-Windows-x64.zip`：EXE 与 `README-package.txt`。
-- `dist/SHA256SUMS.txt`：EXE 与 ZIP 的 SHA-256 校验值。
+- `dist/MT5Workbench-Logo.zip`：龙首 SVG、金／墨／白透明 PNG、墨黑底应用图标与多尺寸 ICO。
+- `dist/SHA256SUMS.txt`：EXE、运行版 ZIP 与图标 ZIP 的 SHA-256 校验值。
+
+品牌资源位于 [`ui/resources/branding/`](../src/mt5_workbench/ui/resources/branding/README.md)。
+使用 `.\.venv\Scripts\python.exe scripts\export_branding.py` 可单独导出图标套装；
+在 `dev` 修改 SVG 后追加 `--install-resources` 更新运行资源，并随代码一起提交。
+构建期间只读取已提交的运行资源；冻结版启动检查同时验证应用图标和顶部标志加载成功。
 
 目标电脑仍需安装并登录 MetaTrader 5 客户端。更新面向运行版用户的说明时同步修改根目录的 `README-package.txt`。
 

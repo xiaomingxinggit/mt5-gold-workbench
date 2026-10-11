@@ -51,6 +51,11 @@ class QmlUiTests(unittest.TestCase):
             window = engine.rootObjects()[0]
             self.assertEqual(window.minimumWidth(), 1200)
             self.assertEqual(window.minimumHeight(), 800)
+            logo = window.findChild(QQuickItem, "applicationLogo")
+            self.assertIsNotNone(logo)
+            QTest.qWait(30)
+            self.assertTrue(logo.property("ready"))
+            self.assertTrue(logo.property("source").toString().endswith("dragon-ink.svg"))
             for page in PAGE_NAMES:
                 bridge.perform("navigate", {"page": page})
                 self.app.processEvents()
@@ -132,6 +137,9 @@ class QmlUiTests(unittest.TestCase):
             bridge._set_state(theme="dark")
             self.app.processEvents()
             self.assertEqual(window.property("themeName"), "dark")
+            QTest.qWait(30)
+            self.assertTrue(logo.property("ready"))
+            self.assertTrue(logo.property("source").toString().endswith("dragon-gold.svg"))
             self.assertEqual(mode_selector.property("contentItem").property("color").name(),
                              "#f3f7fb")
             self.assertEqual(mode_selector.property("background").property("color").name(),
@@ -142,6 +150,10 @@ class QmlUiTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(window.width(), width)
                 self.assertEqual(window.height(), height)
+                logo_position = logo.mapToScene(QPointF(0, 0))
+                self.assertGreaterEqual(logo_position.x(), 0)
+                self.assertLess(logo_position.x() + logo.width(), width)
+                self.assertEqual(logo.width(), 36)
                 calendar = window.findChild(QQuickItem, "journalHeatmapCard")
                 months = window.findChild(QQuickItem, "journalHeatmapMonths")
                 grid = window.findChild(QQuickItem, "journalHeatmapGrid")

@@ -35,4 +35,5 @@ a.binaries = [entry for entry in a.binaries
               if Path(entry[0]).name.lower() not in {"icuuc.dll", "icudt78.dll"}]
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="MT5Workbench",
-          debug=False, strip=False, upx=False, console=False, version=version_info)
+          debug=False, strip=False, upx=False, console=False, version=version_info,
+          icon=str(root / "src/mt5_workbench/ui/resources/branding/app-icon.ico"))

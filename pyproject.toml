@@ -24,4 +24,7 @@ where = ["src"]
     "resources/icons/*.png",
     "resources/icons/svg/dark/*.svg",
     "resources/icons/svg/light/*.svg",
+    "resources/branding/*.svg",
+    "resources/branding/*.ico",
+    "resources/branding/*.png",
 ]
