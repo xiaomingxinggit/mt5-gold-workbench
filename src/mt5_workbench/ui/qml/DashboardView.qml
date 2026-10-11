@@ -144,7 +144,7 @@ Item {
 
             GridLayout {
                 Layout.fillWidth: true
-                columns: scroll.availableWidth >= 1260 ? 5 : scroll.availableWidth >= 900 ? 3 : 2
+                columns: scroll.availableWidth >= 1100 ? 4 : 2
                 columnSpacing: 12
                 rowSpacing: 12
                 MetricCard {
@@ -162,11 +162,6 @@ Item {
                 MetricCard {
                     ui: page.ui; title: "可用保证金"; value: page.money(account.marginFree, false)
                     note: "用于新开仓"; Layout.fillWidth: true
-                }
-                MetricCard {
-                    ui: page.ui; title: "保证金水平"
-                    value: Number(account.margin) > 0 ? page.number(account.marginLevel, 1) + "%" : "—"
-                    note: "无持仓时显示为空"; Layout.fillWidth: true
                 }
             }
 
@@ -191,7 +186,7 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
-                            text: "黄金价格 · 5 分钟 K 线"
+                            text: "黄金价格 · 5 分钟收盘价"
                             color: ui.text
                             font.family: ui.fontFamily
                             font.pixelSize: 15
@@ -199,17 +194,20 @@ Item {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            text: "最近 72 根 · " + ui.timeZoneLabel
+                            text: "最近 72 点 · " + ui.timeZoneLabel
                             color: ui.muted
                             font.family: ui.fontFamily
                             font.pixelSize: 11
                         }
                     }
                     DataChart {
+                        objectName: "dashboardPriceChart"
                         ui: page.ui
                         points: page.pageData.candles || []
-                        mode: "candles"
-                        emptyText: "连接 MT5 后显示 K 线"
+                        mode: "line"
+                        valueKey: "close"
+                        maxPoints: 72
+                        emptyText: "连接 MT5 后显示价格走势"
                         Layout.fillWidth: true
                         Layout.preferredHeight: 264
                     }
@@ -252,7 +250,7 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Text {
-                    text: "K 线约 60 秒刷新；收益按账户币种统计，不含当前浮动盈亏。"
+                    text: "价格折线约 60 秒刷新；收益按账户币种统计，不含当前浮动盈亏。"
                     color: ui.muted
                     font.family: ui.fontFamily
                     font.pixelSize: 11

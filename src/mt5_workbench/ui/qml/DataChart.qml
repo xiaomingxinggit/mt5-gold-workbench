@@ -117,7 +117,7 @@ Item {
             ctx.lineWidth = 1
             ctx.strokeStyle = String(chart.ui ? chart.ui.chartGrid : "#E3EAF2")
             ctx.fillStyle = String(chart.ui ? chart.ui.muted : "#60758D")
-            ctx.font = "11px Microsoft YaHei UI"
+            ctx.font = '11px "Microsoft YaHei UI"'
             ctx.textAlign = "left"
             for (let tick = 0; tick < 4; tick++) {
                 const value = lowest + span * tick / 3
@@ -199,7 +199,7 @@ Item {
             }
 
             ctx.fillStyle = String(chart.ui ? chart.ui.faint : "#8A9AAF")
-            ctx.font = "11px Microsoft YaHei UI"
+            ctx.font = '11px "Microsoft YaHei UI"'
             ctx.textAlign = "left"
             const first = rows[0]
             const last = rows[rows.length - 1]

@@ -19,6 +19,7 @@ from mt5_workbench.config import DEFAULT_SYMBOL
 from mt5_workbench import __version__
 from mt5_workbench.infrastructure.app_data import prepare_state_directory
 from mt5_workbench.ui.qml_trade_bridge import QmlTradingBridge
+from mt5_workbench.ui.windows_identity import configure_taskbar_identity
 
 
 def parse_args(argv: list[str] | None = None):
@@ -36,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["QT_QUICK_BACKEND"] = "software"
         os.environ["MT5_WORKBENCH_DATA_DIR"] = str(Path(args.smoke_test).resolve() / "app-data")
     # Set the Qt Quick Controls style before loading any Controls QML type.
+    taskbar_identity_ok = configure_taskbar_identity()
     QQuickStyle.setStyle("FluentWinUI3")
     app = QApplication.instance() or QApplication(sys.argv)
     if args.smoke_test:
@@ -71,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     if not engine.rootObjects():
         bridge.close()
         return 1
+    # Apply the application icon directly to the native QML window as well.
+    engine.rootObjects()[0].setIcon(app.windowIcon())
     if args.smoke_test:
         def verify():
             output = Path(args.smoke_test).resolve()
@@ -81,10 +85,12 @@ def main(argv: list[str] | None = None) -> int:
             screenshot = window.grabWindow()
             image_ok = not screenshot.isNull() and screenshot.save(str(output / "settings.png"))
             logo = window.findChild(QObject, "applicationLogo")
-            branding_ok = (not app.windowIcon().isNull() and not window.icon().isNull()
+            branding_ok = (taskbar_identity_ok is not False
+                           and not app.windowIcon().isNull() and not window.icon().isNull()
                            and logo is not None and logo.property("ready"))
             result = {"ok": bool(image_ok and branding_ok and not warnings), "version": __version__,
                       "brandingOk": branding_ok,
+                      "taskbarIdentityOk": taskbar_identity_ok,
                       "warnings": warnings, "stateDirectory": bridge.state["system"]["stateDirectory"]}
             (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             app.exit(0 if result["ok"] else 1)
